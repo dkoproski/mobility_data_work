@@ -1,0 +1,203 @@
+---
+title: "Practicum Preliminary Work"
+author: "Dylan Koproski"
+date: "2024-09-16"
+output: pdf_document
+---
+```{r}
+library(tidyverse)
+library(jsonlite)
+library(jsonlite)
+library(purrr)
+```
+
+## Manipulate Visitor Data
+
+ISSUES FOR CONSIDERATION: 4's. I think rounding all 4s to 1 is a conservative approach we could work with.
+
+```{r}
+## County Codes for NYC
+#The Bronx is Bronx County (ANSI / FIPS 36005)
+#Brooklyn is Kings County (ANSI / FIPS 36047)
+#Manhattan is New York County (ANSI / FIPS 36061)
+#Queens is Queens County (ANSI / FIPS 36081)
+#Staten Island is Richmond County (ANSI / FIPS 36085)
+
+state_county_code_str = c(36005, 36047, 36061, 36081, 36085)
+
+df_visitor = read_csv("Weekly_Patterns_Foot_Traffic_Full_Historical_Data-0-DATE_RANGE_START-2020-01-06.csv")
+  
+filtered_df_visitor = df_visitor |> 
+  mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
+  filter(first_five_digits %in% state_county_code_str) |> 
+#Adjust variables in the "Select()" function to change which columns remain in the final dataframe.
+  filter(!is.na(visitor_home_cbgs)) |> 
+  mutate(identifier = row_number()) |> 
+  mutate(poi_zip = postal_code) |> 
+  mutate(visitor_home_cbgs = map(visitor_home_cbgs, ~fromJSON(as.character(.)))) |> 
+  select(location_name, date_range_start, date_range_end, visitor_home_cbgs, top_category, identifier, poi_cbg, poi_zip) |>
+  unnest_longer(visitor_home_cbgs) |>
+  rename(cbg = visitor_home_cbgs_id, visitors = visitor_home_cbgs) 
+ ## |>  filter(top_category == "category of interest name")
+```
+
+## Manipulate Census Data
+
+ISSUES: condensing code, adding margins of error
+
+```{r}
+df_census = read_csv("full_census_2020/full_census_2020.csv", skip = 1) |> 
+  janitor::clean_names()
+
+filtered_df_census_totals =
+  df_census |> 
+  rowwise() |> 
+  mutate(cbg = str_sub(geography, -12)) |> 
+  select(estimate_total, cbg, geographic_area_name, starts_with("estimate")) |> 
+  mutate(
+    under_5 = sum(estimate_total_male_under_5_years, estimate_total_female_under_5_years),
+    age_5_9 = sum(estimate_total_male_5_to_9_years, estimate_total_female_5_to_9_years),
+    age_10_14 = sum(estimate_total_male_10_to_14_years, estimate_total_female_10_to_14_years),
+    age_15_17 = sum(estimate_total_male_15_to_17_years, estimate_total_female_15_to_17_years),
+    age_18_19 = sum(estimate_total_male_18_and_19_years, estimate_total_female_18_and_19_years),
+    age_20 = sum(estimate_total_male_20_years, estimate_total_female_20_years),
+    age_21 = sum(estimate_total_male_21_years, estimate_total_female_21_years),
+    age_22_24 = sum(estimate_total_male_22_to_24_years, estimate_total_female_22_to_24_years),
+    age_25_29 = sum(estimate_total_male_25_to_29_years, estimate_total_female_25_to_29_years),
+    age_30_34 = sum(estimate_total_male_30_to_34_years, estimate_total_female_30_to_34_years),
+    age_35_39 = sum(estimate_total_male_35_to_39_years, estimate_total_female_35_to_39_years),
+    age_40_44 = sum(estimate_total_male_40_to_44_years, estimate_total_female_40_to_44_years),
+    age_45_49 = sum(estimate_total_male_45_to_49_years, estimate_total_female_45_to_49_years),
+    age_50_54 = sum(estimate_total_male_50_to_54_years, estimate_total_female_50_to_54_years),
+    age_55_59 = sum(estimate_total_male_55_to_59_years, estimate_total_female_55_to_59_years),
+    age_60_61 = sum(estimate_total_male_60_and_61_years, estimate_total_female_60_and_61_years),
+    age_62_64 = sum(estimate_total_male_62_to_64_years, estimate_total_female_62_to_64_years),
+    age_65_66 = sum(estimate_total_male_65_and_66_years, estimate_total_female_65_and_66_years),
+    age_67_69 = sum(estimate_total_male_67_to_69_years, estimate_total_female_67_to_69_years),
+    age_70_74 = sum(estimate_total_male_70_to_74_years, estimate_total_female_70_to_74_years),
+    age_75_79 = sum(estimate_total_male_75_to_79_years, estimate_total_female_75_to_79_years),
+    age_80_84 = sum(estimate_total_male_80_to_84_years, estimate_total_female_80_to_84_years),
+    age_85_plus = sum(estimate_total_male_85_years_and_over, estimate_total_female_85_years_and_over)
+  ) |>
+  rename("total" = estimate_total) |> 
+  select(!starts_with("estimate"))
+
+filtered_df_census_props =
+  df_census |> 
+  rowwise() |> 
+  mutate(cbg = str_sub(geography, -12)) |> 
+  select(estimate_total, cbg, geographic_area_name, starts_with("estimate")) |> 
+  mutate(
+    under_5 = sum(estimate_total_male_under_5_years, estimate_total_female_under_5_years) / estimate_total / estimate_total,
+    age_5_9 = sum(estimate_total_male_5_to_9_years, estimate_total_female_5_to_9_years) / estimate_total,
+    age_10_14 = sum(estimate_total_male_10_to_14_years, estimate_total_female_10_to_14_years) / estimate_total,
+    age_15_17 = sum(estimate_total_male_15_to_17_years, estimate_total_female_15_to_17_years) / estimate_total,
+    age_18_19 = sum(estimate_total_male_18_and_19_years, estimate_total_female_18_and_19_years) / estimate_total,
+    age_20 = sum(estimate_total_male_20_years, estimate_total_female_20_years) / estimate_total,
+    age_21 = sum(estimate_total_male_21_years, estimate_total_female_21_years) / estimate_total,
+    age_22_24 = sum(estimate_total_male_22_to_24_years, estimate_total_female_22_to_24_years) / estimate_total,
+    age_25_29 = sum(estimate_total_male_25_to_29_years, estimate_total_female_25_to_29_years) / estimate_total,
+    age_30_34 = sum(estimate_total_male_30_to_34_years, estimate_total_female_30_to_34_years) / estimate_total,
+    age_35_39 = sum(estimate_total_male_35_to_39_years, estimate_total_female_35_to_39_years) / estimate_total,
+    age_40_44 = sum(estimate_total_male_40_to_44_years, estimate_total_female_40_to_44_years) / estimate_total,
+    age_45_49 = sum(estimate_total_male_45_to_49_years, estimate_total_female_45_to_49_years) / estimate_total,
+    age_50_54 = sum(estimate_total_male_50_to_54_years, estimate_total_female_50_to_54_years) / estimate_total,
+    age_55_59 = sum(estimate_total_male_55_to_59_years, estimate_total_female_55_to_59_years) / estimate_total,
+    age_60_61 = sum(estimate_total_male_60_and_61_years, estimate_total_female_60_and_61_years) / estimate_total,
+    age_62_64 = sum(estimate_total_male_62_to_64_years, estimate_total_female_62_to_64_years) / estimate_total,
+    age_65_66 = sum(estimate_total_male_65_and_66_years, estimate_total_female_65_and_66_years) / estimate_total,
+    age_67_69 = sum(estimate_total_male_67_to_69_years, estimate_total_female_67_to_69_years) / estimate_total,
+    age_70_74 = sum(estimate_total_male_70_to_74_years, estimate_total_female_70_to_74_years) / estimate_total,
+    age_75_79 = sum(estimate_total_male_75_to_79_years, estimate_total_female_75_to_79_years) / estimate_total,
+    age_80_84 = sum(estimate_total_male_80_to_84_years, estimate_total_female_80_to_84_years) / estimate_total,
+    age_85_plus = sum(estimate_total_male_85_years_and_over, estimate_total_female_85_years_and_over) / estimate_total
+  ) |>
+  rename("total" = estimate_total) |> 
+  select(!starts_with("estimate"))
+  
+
+```
+
+
+## Merge to prepare for imputing
+
+ISSUES: none
+
+```{r}
+df_merged = right_join(filtered_df_visitor, filtered_df_census_props, by = "cbg")
+```
+
+## Impute
+
+ISSUES: condensing code
+
+```{r}
+df_estimated_visitors =
+  df_merged |> 
+  mutate(
+    visitors_under_5 = visitors * under_5,
+    visitors_5_9 = visitors * age_5_9,
+    visitors_10_14 = visitors * age_10_14,
+    visitors_15_17 = visitors * age_15_17,
+    visitors_18_19 = visitors * age_18_19,
+    visitors_20 = visitors * age_20,
+    visitors_21 = visitors * age_21,
+    visitors_22_24 = visitors * age_22_24,
+    visitors_25_29 = visitors * age_25_29,
+    visitors_30_34 = visitors * age_30_34,
+    visitors_35_39 = visitors * age_35_39,
+    visitors_40_44 = visitors * age_40_44,
+    visitors_45_49 = visitors * age_45_49,
+    visitors_50_54 = visitors * age_50_54,
+    visitors_55_59 = visitors * age_55_59,
+    visitors_60_61 = visitors * age_60_61,
+    visitors_62_64 = visitors * age_62_64,
+    visitors_65_66 = visitors * age_65_66,
+    visitors_67_69 = visitors * age_67_69,
+    visitors_70_74 = visitors * age_70_74,
+    visitors_75_79 = visitors * age_75_79,
+    visitors_80_84 = visitors * age_80_84,
+    visitors_85_plus = visitors * age_85_plus
+)
+
+
+# Assuming 'id' is your unique identifier and you want to sum across all age groups for each identifier
+
+df_aggregated_age_group_visitors = 
+  df_estimated_visitors |> 
+  group_by(identifier) |> 
+  summarize(
+    location_name = first(location_name),
+    date_range_start = first(date_range_start),
+    date_range_end = first(date_range_end),
+    top_category = first(top_category),
+    cbg = first(cbg),
+    total_visitors_under_5 = sum(visitors_under_5, na.rm = TRUE),
+    total_visitors_5_9 = sum(visitors_5_9, na.rm = TRUE),
+    total_visitors_10_14 = sum(visitors_10_14, na.rm = TRUE),
+    total_visitors_15_17 = sum(visitors_15_17, na.rm = TRUE),
+    total_visitors_18_19 = sum(visitors_18_19, na.rm = TRUE),
+    total_visitors_20 = sum(visitors_20, na.rm = TRUE),
+    total_visitors_21 = sum(visitors_21, na.rm = TRUE),
+    total_visitors_22_24 = sum(visitors_22_24, na.rm = TRUE),
+    total_visitors_25_29 = sum(visitors_25_29, na.rm = TRUE),
+    total_visitors_30_34 = sum(visitors_30_34, na.rm = TRUE),
+    total_visitors_35_39 = sum(visitors_35_39, na.rm = TRUE),
+    total_visitors_40_44 = sum(visitors_40_44, na.rm = TRUE),
+    total_visitors_45_49 = sum(visitors_45_49, na.rm = TRUE),
+    total_visitors_50_54 = sum(visitors_50_54, na.rm = TRUE),
+    total_visitors_55_59 = sum(visitors_55_59, na.rm = TRUE),
+    total_visitors_60_61 = sum(visitors_60_61, na.rm = TRUE),
+    total_visitors_62_64 = sum(visitors_62_64, na.rm = TRUE),
+    total_visitors_65_66 = sum(visitors_65_66, na.rm = TRUE),
+    total_visitors_67_69 = sum(visitors_67_69, na.rm = TRUE),
+    total_visitors_70_74 = sum(visitors_70_74, na.rm = TRUE),
+    total_visitors_75_79 = sum(visitors_75_79, na.rm = TRUE),
+    total_visitors_80_84 = sum(visitors_80_84, na.rm = TRUE),
+    total_visitors_85_plus = sum(visitors_85_plus, na.rm = TRUE)
+  ) |> 
+  mutate(across(starts_with("total_visitors"), round, digits = 0))
+
+
+```
+
