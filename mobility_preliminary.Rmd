@@ -1,9 +1,11 @@
 ---
 title: "Practicum Preliminary Work"
-author: "Dylan Koproski"
+author: "Dylan Koproski & Dylan Morgan"
 date: "2024-09-16"
 output: pdf_document
 ---
+
+NOTE: THIS NEEDS DATA TO RUN!!! You need: the advan data csv file, the census data file! I cannot push these to github, they are too large. If you keep them in your repository, please update gitignore to work with them! Furthermore, both dataframes are loaded using `read_csv()`, so you can spotlight search to see how I have named the two of them. It is best to download them locally on your end and then rename the `.csv` as I have so that everything runs smoothly!
 ```{r}
 library(tidyverse)
 library(jsonlite)
@@ -25,7 +27,10 @@ ISSUES FOR CONSIDERATION: 4's. I think rounding all 4s to 1 is a conservative ap
 
 state_county_code_str = c(36005, 36047, 36061, 36081, 36085)
 
-df_visitor = read_csv("Weekly_Patterns_Foot_Traffic_Full_Historical_Data-0-DATE_RANGE_START-2020-01-06.csv")
+df_visitor = read_csv("mobility.csv")
+
+df_census = read_csv("full_census_2020.csv", skip = 1) |> 
+  janitor::clean_names()
   
 filtered_df_visitor = df_visitor |> 
   mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
@@ -46,9 +51,6 @@ filtered_df_visitor = df_visitor |>
 ISSUES: condensing code, adding margins of error
 
 ```{r}
-df_census = read_csv("full_census_2020/full_census_2020.csv", skip = 1) |> 
-  janitor::clean_names()
-
 filtered_df_census_totals =
   df_census |> 
   rowwise() |> 
