@@ -31,6 +31,9 @@ df_visitor = read_csv("mobility.csv")
 
 df_census = read_csv("full_census_2020.csv", skip = 1) |> 
   janitor::clean_names()
+
+df_tract_zip = readxl::read_excel("tract_zip.xlsx")
+df_census_zips = read_csv("census_zips.csv") 
   
 filtered_df_visitor = df_visitor |> 
   mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
