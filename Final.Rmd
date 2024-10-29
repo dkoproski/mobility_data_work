@@ -4,6 +4,9 @@ author: "Dylan Koproski & Dylan Morgan"
 date: "2024-10-29"
 output: pdf_document
 ---
+
+* Verify that the zip matching worked properly, and check for missing zip codes
+
 ```{r}
 library(tidyverse)
 library(jsonlite)
@@ -26,10 +29,10 @@ filtered_df_visitor = df_visitor |>
   mutate(identifier = row_number()) |> 
   mutate(poi_zip = postal_code) |> 
   mutate(visitor_home_aggregation = map(visitor_home_aggregation, ~fromJSON(as.character(.)))) |> 
-  select(location_name, date_range_start, date_range_end, visitor_home_aggregation, top_category, identifier, poi_cbg, poi_zip) |>
+  select(location_name, date_range_start, date_range_end, visitor_home_aggregation, top_category, identifier, poi_cbg, poi_zip, latitude, longitude) |>
   unnest_longer(visitor_home_aggregation) |>
   rename(visitor_census_tract = visitor_home_aggregation_id, visitors = visitor_home_aggregation) |> 
-  mutate(visitors = if_else(visitors == 4, 3, visitors))
+  mutate(visitors = if_else(visitors == 4, 3, visitors)) 
 
 # Census data processing
 df_census = df_census |> 
@@ -92,7 +95,9 @@ final_df = merged_df |>
 
 ```
 
-# MATRIX TIME
+# Visualizing the matrix of zip code - zip code
+
+## Preliminary matrix, this guy looks bad
 
 ```{r}
 # Remove rows with NA in visitor_zip or poi_zip
@@ -113,11 +118,17 @@ zip_matrix_plot = zip_matrix |>
     xlab = "Destination ZIP (To)",
     ylab = "Origin ZIP (From)"
   )
+```
+
+## Tile graph of state to destination zip in NYC, a little better, at least we can see that the data isn't incredibly sparse
+
+``` {r}
+## It is so wacky to present this in a matrix, we aren't doing that
 
 final_df_with_state = final_df |> 
   left_join(df_tract_zip, by = c("visitor_zip" = "zip")) |> 
   rename(visitor_state = usps_zip_pref_state)
-
+## later things are dependent on this
 state_zip_matrix = final_df_with_state |> 
   group_by(visitor_state, poi_zip) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
@@ -132,5 +143,124 @@ ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visito
   ) + 
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
+# Further analysis
+
+```{r}
+
+# Create the ZIP-to-ZIP visitor flow matrix
+zip_flow_matrix = final_df |> 
+  filter(!is.na(visitor_zip) & !is.na(poi_zip)) |> 
+  group_by(visitor_zip, poi_zip) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
+  pivot_wider(names_from = poi_zip, values_from = total_visitors, values_fill = 0) |> 
+  column_to_rownames("visitor_zip") |> 
+  as.matrix()
+
+# Check for rows/columns with all zeros and filter them out (if necessary) -> only necessary if the following errors out
+zip_flow_matrix = zip_flow_matrix[rowSums(zip_flow_matrix) > 0, colSums(zip_flow_matrix) > 0]
+
+```
+
+## PCA
+Learned this in DSII, could be helpful buy reducing the dimensionality of the data
+
+```{r}
+# Run PCA on the zip-to-zip matrix
+pca_result = prcomp(zip_flow_matrix, scale = TRUE)
+
+# Plot the first two principal components
+plot(pca_result$x[,1:2], col = "blue", pch = 20,
+     main = "PCA of ZIP-to-ZIP Visitor Flows",
+     xlab = "PC1", ylab = "PC2")
+```
+
+# PCA analysis
+
+```{r}
+# Get the loadings (contributions of each ZIP-to-ZIP flow to PC1 and PC2)
+pca_loadings = pca_result$rotation[, 1:2]  # Select loadings for the first two principal components
+
+# View the top contributors to PC1 and PC2
+top_pc1_contributors = sort(abs(pca_loadings[, 1]), decreasing = TRUE)[1:10]
+top_pc2_contributors = sort(abs(pca_loadings[, 2]), decreasing = TRUE)[1:10]
+
+top_pc1_contributors
+top_pc2_contributors
+```
+
+## Cluster analysis on PCA reduced data
+
+### Optimal number of clusters in PCA reduced data
+
+```{r}
+wss = sapply(1:10, function(k) {
+  kmeans(pca_result$x[, 1:2], centers = k, nstart = 10)$tot.withinss
+})
+
+# Plot the elbow curve
+plot(1:10, wss, type = "b", pch = 19, frame = FALSE,
+     xlab = "Number of Clusters (k)",
+     ylab = "Total Within Sum of Squares",
+     main = "Elbow Method for Determining Optimal Clusters")
+```
+
+### Apply k means clustering
+
+```{r}
+set.seed(42)
+k = 4  # Replace this with the chosen number of clusters
+kmeans_result = kmeans(pca_result$x[, 1:2], centers = k, nstart = 10)
+
+# Plot PCA with clusters
+plot(pca_result$x[, 1:2], col = kmeans_result$cluster, pch = 19,
+     main = "PCA of ZIP-to-ZIP Visitor Flows with Clusters",
+     xlab = "PC1", ylab = "PC2")
+```
+
+### Map outliers 
+
+```{r}
+# Identify outliers based on a threshold (e.g., PC1 or PC2 > 10 or < -10)
+outliers = rownames(pca_result$x)[pca_result$x[, 1] > 10 | pca_result$x[, 1] < -10 | 
+                                    pca_result$x[, 2] > 10 | pca_result$x[, 2] < -10]
+
+outliers
+```
+
+### Cluster summaries
+
+```{r}
+# Add cluster labels to the original ZIP-to-ZIP matrix
+zip_flow_with_clusters = as.data.frame(zip_flow_matrix)
+zip_flow_with_clusters$cluster = kmeans_result$cluster
+
+# Summarize visitor flows by cluster
+cluster_summary = zip_flow_with_clusters |> 
+  group_by(cluster) |> 
+  summarise(across(everything(), mean, na.rm = TRUE))
+
+cluster_summary
+```
+
+### Mapping
+
+```{r}
+library(ggmap)
+
+nyc_zip_visitors = final_df |> 
+  group_by(poi_zip) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
+
+ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon", color = NA) +
+  scale_fill_viridis_c() +
+  labs(
+    title = "Heatmap of NYC ZIP Codes by Visitor Counts",
+    x = "Longitude", 
+    y = "Latitude"
+  ) +
+  theme_minimal()
 ```
 
