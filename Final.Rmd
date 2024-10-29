@@ -1,0 +1,136 @@
+---
+title: "Final"
+author: "Dylan Koproski & Dylan Morgan"
+date: "2024-10-29"
+output: pdf_document
+---
+```{r}
+library(tidyverse)
+library(jsonlite)
+library(readxl)
+
+# Load data
+df_visitor = read_csv("mobility.csv")
+df_census = read_csv("tract_census.csv", skip = 1) |> 
+  janitor::clean_names()
+df_tract_zip = read_excel("tract_zip.xlsx")
+
+# Temporary restriction to NYC
+state_county_code_str = c(36005, 36047, 36061, 36081, 36085)
+
+# Process visitor data
+filtered_df_visitor = df_visitor |> 
+  mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
+  filter(first_five_digits %in% state_county_code_str) |> 
+  filter(!is.na(visitor_home_aggregation)) |> 
+  mutate(identifier = row_number()) |> 
+  mutate(poi_zip = postal_code) |> 
+  mutate(visitor_home_aggregation = map(visitor_home_aggregation, ~fromJSON(as.character(.)))) |> 
+  select(location_name, date_range_start, date_range_end, visitor_home_aggregation, top_category, identifier, poi_cbg, poi_zip) |>
+  unnest_longer(visitor_home_aggregation) |>
+  rename(visitor_census_tract = visitor_home_aggregation_id, visitors = visitor_home_aggregation) |> 
+  mutate(visitors = if_else(visitors == 4, 3, visitors))
+
+# Census data processing
+df_census = df_census |> 
+  rowwise() |> 
+  mutate(cbg = str_sub(geography, -11))
+
+# Age group proportions in census data
+filtered_df_census_totals = 
+  df_census |> 
+  rowwise() |> 
+  select(estimate_total_total_population, cbg, geographic_area_name, starts_with("estimate")) |> 
+  mutate(
+    total_under_18 = sum(estimate_total_total_population_age_under_5_years,
+                         estimate_total_total_population_age_5_to_9_years,
+                         estimate_total_total_population_age_10_to_14_years,
+                         estimate_total_total_population_age_15_to_19_years) / estimate_total_total_population,
+    
+    total_19_65 = sum(estimate_total_total_population_age_20_to_24_years,
+                      estimate_total_total_population_age_25_to_29_years,
+                      estimate_total_total_population_age_30_to_34_years,
+                      estimate_total_total_population_age_35_to_39_years,
+                      estimate_total_total_population_age_40_to_44_years,
+                      estimate_total_total_population_age_45_to_49_years,
+                      estimate_total_total_population_age_50_to_54_years,
+                      estimate_total_total_population_age_55_to_59_years,
+                      estimate_total_total_population_age_60_to_64_years,
+                      estimate_total_total_population_age_65_to_69_years) / estimate_total_total_population,
+
+    total_65_plus = sum(estimate_total_total_population_age_70_to_74_years,
+                        estimate_total_total_population_age_75_to_79_years,
+                        estimate_total_total_population_age_80_to_84_years,
+                        estimate_total_total_population_age_85_years_and_over) / estimate_total_total_population
+  ) |> 
+  rename("total" = estimate_total_total_population) |> 
+  select(cbg, geographic_area_name, total, total_under_18, total_19_65, total_65_plus)
+
+# Define primary ZIP code per census tract
+primary_tract_zip = df_tract_zip |> 
+  group_by(tract) |> 
+  summarize(zip = min(zip))  # Selects the minimum ZIP as primary for simplicity
+
+# Merge filtered_df_census_totals with filtered_df_visitor
+merged_df = filtered_df_visitor |> 
+  inner_join(filtered_df_census_totals, by = c("visitor_census_tract" = "cbg")) |> 
+  mutate(
+    visitors_under_18 = visitors * total_under_18,
+    visitors_19_65 = visitors * total_19_65,
+    visitors_65_plus = visitors * total_65_plus
+  ) 
+
+# Map primary ZIP codes by merging with primary_tract_zip on the census tract
+final_df = merged_df |> 
+  left_join(primary_tract_zip, by = c("visitor_census_tract" = "tract")) |> 
+  select(location_name, date_range_start, date_range_end, top_category, 
+         identifier, poi_cbg, poi_zip, visitors, visitors_under_18, 
+         visitors_19_65, visitors_65_plus, zip) |> 
+  mutate(visitor_zip = zip)
+
+
+
+```
+
+# MATRIX TIME
+
+```{r}
+# Remove rows with NA in visitor_zip or poi_zip
+zip_matrix = final_df |> 
+  filter(!is.na(visitor_zip) & !is.na(poi_zip)) |> 
+  group_by(visitor_zip, poi_zip) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
+  pivot_wider(names_from = poi_zip, values_from = total_visitors, values_fill = 0)
+
+# Convert to matrix and plot
+zip_matrix_plot = zip_matrix |> 
+  column_to_rownames("visitor_zip") |> 
+  as.matrix() |> 
+  heatmap(
+    col = colorRampPalette(c("white", "red"))(100),
+    scale = "none",
+    main = "Zip-to-Zip Visitor Flow",
+    xlab = "Destination ZIP (To)",
+    ylab = "Origin ZIP (From)"
+  )
+
+final_df_with_state = final_df |> 
+  left_join(df_tract_zip, by = c("visitor_zip" = "zip")) |> 
+  rename(visitor_state = usps_zip_pref_state)
+
+state_zip_matrix = final_df_with_state |> 
+  group_by(visitor_state, poi_zip) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
+
+ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visitors)) + 
+  geom_tile() + 
+  scale_fill_viridis_c() + 
+  labs(
+    title = "State-to-NYC ZIP Code Visitor Flow",
+    x = "Destination ZIP (NYC)",
+    y = "Origin State"
+  ) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+

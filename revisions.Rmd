@@ -34,10 +34,135 @@ filtered_df_visitor = df_visitor |>
   rename(visitor_census_tract = visitor_home_aggregation_id, visitors = visitor_home_aggregation) |> 
   mutate(visitors = if_else(visitors == 4, 3, visitors))
  ## |>  filter(top_category == "category of interest name")
+
+
 ```
+
+# 3 ages
 
 ```{r}
+df_census =
+  df_census |> 
+  rowwise() |> 
+  mutate(cbg = str_sub(geography, -11))
 
+#Props for the 3 age groups
+filtered_df_census_totals = 
+  df_census |> 
+  rowwise() |> 
+  select(estimate_total_total_population, cbg, geographic_area_name, starts_with("estimate")) |> 
+  mutate(
+    total_under_18 = sum(estimate_total_total_population_age_under_5_years,
+                         estimate_total_total_population_age_5_to_9_years,
+                         estimate_total_total_population_age_10_to_14_years,
+                         estimate_total_total_population_age_15_to_19_years) / estimate_total_total_population,
+    
+    total_19_65 = sum(estimate_total_total_population_age_20_to_24_years,
+                      estimate_total_total_population_age_25_to_29_years,
+                      estimate_total_total_population_age_30_to_34_years,
+                      estimate_total_total_population_age_35_to_39_years,
+                      estimate_total_total_population_age_40_to_44_years,
+                      estimate_total_total_population_age_45_to_49_years,
+                      estimate_total_total_population_age_50_to_54_years,
+                      estimate_total_total_population_age_55_to_59_years,
+                      estimate_total_total_population_age_60_to_64_years,
+                      estimate_total_total_population_age_65_to_69_years) / estimate_total_total_population,
 
+    total_65_plus = sum(estimate_total_total_population_age_70_to_74_years,
+                        estimate_total_total_population_age_75_to_79_years,
+                        estimate_total_total_population_age_80_to_84_years,
+                        estimate_total_total_population_age_85_years_and_over) / estimate_total_total_population
+  ) |> 
+  rename("total" = estimate_total_total_population) |> 
+  select(cbg, geographic_area_name, total, total_under_18, total_19_65, total_65_plus)
 ```
 
+
+```{r}
+# Merge filtered_df_census_totals with filtered_df_visitor
+merged_df = filtered_df_visitor |> 
+  inner_join(filtered_df_census_totals, by = c("visitor_census_tract" = "cbg")) |> 
+  mutate(
+    visitors_under_18 = visitors * total_under_18,
+    visitors_19_65 = visitors * total_19_65,
+    visitors_65_plus = visitors * total_65_plus
+  ) 
+
+# Map ZIP codes by merging with df_tract_zip on the census tract
+final_df = merged_df |> 
+  left_join(df_tract_zip, by = c("visitor_census_tract" = "tract")) |> 
+  select(location_name, date_range_start, date_range_end, top_category, 
+         identifier, poi_cbg, poi_zip, visitors, visitors_under_18, 
+         visitors_19_65, visitors_65_plus, zip) |> 
+  mutate(visitor_zip = zip)
+```
+
+
+# Model
+
+
+
+
+```{r, eval = FALSE}
+df_census =
+  df_census |> 
+  rowwise() |> 
+  mutate(cbg = str_sub(geography, -11))
+# totals
+filtered_df_census_totals = 
+  df_census |> 
+  rowwise() |> 
+  select(estimate_total_total_population, cbg, geographic_area_name, starts_with("estimate")) |> 
+  mutate(
+    under_5 = estimate_total_total_population_age_under_5_years,
+    age_5_9 = estimate_total_total_population_age_5_to_9_years,
+    age_10_14 = estimate_total_total_population_age_10_to_14_years,
+    age_15_17 = estimate_total_total_population_age_15_to_19_years,
+    age_22_24 = estimate_total_total_population_age_20_to_24_years,
+    age_25_29 = estimate_total_total_population_age_25_to_29_years,
+    age_30_34 = estimate_total_total_population_age_30_to_34_years,
+    age_35_39 = estimate_total_total_population_age_35_to_39_years,
+    age_40_44 = estimate_total_total_population_age_40_to_44_years,
+    age_45_49 = estimate_total_total_population_age_45_to_49_years,
+    age_50_54 = estimate_total_total_population_age_50_to_54_years,
+    age_55_59 = estimate_total_total_population_age_55_to_59_years,
+    age_62_64 = estimate_total_total_population_age_60_to_64_years,
+    age_67_69 = estimate_total_total_population_age_65_to_69_years,
+    age_70_74 = estimate_total_total_population_age_70_to_74_years,
+    age_75_79 = estimate_total_total_population_age_75_to_79_years,
+    age_80_84 = estimate_total_total_population_age_80_to_84_years,
+    age_85_plus = estimate_total_total_population_age_85_years_and_over
+  ) |>
+  rename("total" = estimate_total_total_population) |> 
+  select(!starts_with("estimate"))
+
+# props 
+filtered_df_census_props = 
+  df_census |> 
+  rowwise() |> 
+  select(estimate_total_total_population, cbg, geographic_area_name, starts_with("estimate")) |> 
+  mutate(
+    under_5 = estimate_total_total_population_age_under_5_years / estimate_total_total_population,
+    age_5_9 = estimate_total_total_population_age_5_to_9_years / estimate_total_total_population,
+    age_10_14 = estimate_total_total_population_age_10_to_14_years / estimate_total_total_population,
+    age_15_17 = estimate_total_total_population_age_15_to_19_years / estimate_total_total_population,
+    age_22_24 = estimate_total_total_population_age_20_to_24_years / estimate_total_total_population,
+    age_25_29 = estimate_total_total_population_age_25_to_29_years / estimate_total_total_population,
+    age_30_34 = estimate_total_total_population_age_30_to_34_years / estimate_total_total_population,
+    age_35_39 = estimate_total_total_population_age_35_to_39_years / estimate_total_total_population,
+    age_40_44 = estimate_total_total_population_age_40_to_44_years / estimate_total_total_population,
+    age_45_49 = estimate_total_total_population_age_45_to_49_years / estimate_total_total_population,
+    age_50_54 = estimate_total_total_population_age_50_to_54_years / estimate_total_total_population,
+    age_55_59 = estimate_total_total_population_age_55_to_59_years / estimate_total_total_population,
+    age_62_64 = estimate_total_total_population_age_60_to_64_years / estimate_total_total_population,
+    age_67_69 = estimate_total_total_population_age_65_to_69_years / estimate_total_total_population,
+    age_70_74 = estimate_total_total_population_age_70_to_74_years / estimate_total_total_population,
+    age_75_79 = estimate_total_total_population_age_75_to_79_years / estimate_total_total_population,
+    age_80_84 = estimate_total_total_population_age_80_to_84_years / estimate_total_total_population,
+    age_85_plus = estimate_total_total_population_age_85_years_and_over / estimate_total_total_population
+  ) |> 
+  rename("total" = estimate_total_total_population) |> 
+  select(!starts_with("estimate"))
+  
+
+```

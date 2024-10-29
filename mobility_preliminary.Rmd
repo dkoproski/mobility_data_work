@@ -166,8 +166,6 @@ df_estimated_visitors =
 )
 
 
-# Assuming 'id' is your unique identifier and you want to sum across all age groups for each identifier
-
 df_aggregated_age_group_visitors = 
   df_estimated_visitors |> 
   group_by(identifier) |> 
