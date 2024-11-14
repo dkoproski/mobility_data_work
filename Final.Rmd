@@ -88,7 +88,7 @@ final_df = merged_df |>
   left_join(primary_tract_zip, by = c("visitor_census_tract" = "tract")) |> 
   select(location_name, date_range_start, date_range_end, top_category, 
          identifier, poi_cbg, poi_zip, visitors, visitors_under_18, 
-         visitors_19_65, visitors_65_plus, zip) |> 
+         visitors_19_65, visitors_65_plus, zip, longitude, latitude) |> 
   mutate(visitor_zip = zip)
 
 
@@ -250,14 +250,14 @@ cluster_summary
 library(ggmap)
 
 nyc_zip_visitors = final_df |> 
-  group_by(poi_zip) |> 
+  group_by(longitude, latitude) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
 
 ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
   stat_density_2d(aes(fill = ..level..), geom = "polygon", color = NA) +
   scale_fill_viridis_c() +
   labs(
-    title = "Heatmap of NYC ZIP Codes by Visitor Counts",
+    title = "Heatmap of NYC POIs by Visitor Counts",
     x = "Longitude", 
     y = "Latitude"
   ) +
