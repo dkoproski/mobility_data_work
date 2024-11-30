@@ -145,105 +145,6 @@ ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visito
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 ```
 
-# Further analysis
-
-```{r}
-
-# Create the ZIP-to-ZIP visitor flow matrix
-zip_flow_matrix = final_df |> 
-  filter(!is.na(visitor_zip) & !is.na(poi_zip)) |> 
-  group_by(visitor_zip, poi_zip) |> 
-  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
-  pivot_wider(names_from = poi_zip, values_from = total_visitors, values_fill = 0) |> 
-  column_to_rownames("visitor_zip") |> 
-  as.matrix()
-
-# Check for rows/columns with all zeros and filter them out (if necessary) -> only necessary if the following errors out
-zip_flow_matrix = zip_flow_matrix[rowSums(zip_flow_matrix) > 0, colSums(zip_flow_matrix) > 0]
-
-```
-
-## PCA
-Learned this in DSII, could be helpful buy reducing the dimensionality of the data
-
-```{r}
-# Run PCA on the zip-to-zip matrix
-pca_result = prcomp(zip_flow_matrix, scale = TRUE)
-
-# Plot the first two principal components
-plot(pca_result$x[,1:2], col = "blue", pch = 20,
-     main = "PCA of ZIP-to-ZIP Visitor Flows",
-     xlab = "PC1", ylab = "PC2")
-```
-
-# PCA analysis
-
-```{r}
-# Get the loadings (contributions of each ZIP-to-ZIP flow to PC1 and PC2)
-pca_loadings = pca_result$rotation[, 1:2]  # Select loadings for the first two principal components
-
-# View the top contributors to PC1 and PC2
-top_pc1_contributors = sort(abs(pca_loadings[, 1]), decreasing = TRUE)[1:10]
-top_pc2_contributors = sort(abs(pca_loadings[, 2]), decreasing = TRUE)[1:10]
-
-top_pc1_contributors
-top_pc2_contributors
-```
-
-## Cluster analysis on PCA reduced data
-
-### Optimal number of clusters in PCA reduced data
-
-```{r}
-wss = sapply(1:10, function(k) {
-  kmeans(pca_result$x[, 1:2], centers = k, nstart = 10)$tot.withinss
-})
-
-# Plot the elbow curve
-plot(1:10, wss, type = "b", pch = 19, frame = FALSE,
-     xlab = "Number of Clusters (k)",
-     ylab = "Total Within Sum of Squares",
-     main = "Elbow Method for Determining Optimal Clusters")
-```
-
-### Apply k means clustering
-
-```{r}
-set.seed(42)
-k = 4  # Replace this with the chosen number of clusters
-kmeans_result = kmeans(pca_result$x[, 1:2], centers = k, nstart = 10)
-
-# Plot PCA with clusters
-plot(pca_result$x[, 1:2], col = kmeans_result$cluster, pch = 19,
-     main = "PCA of ZIP-to-ZIP Visitor Flows with Clusters",
-     xlab = "PC1", ylab = "PC2")
-```
-
-### Map outliers 
-
-```{r}
-# Identify outliers based on a threshold (e.g., PC1 or PC2 > 10 or < -10)
-outliers = rownames(pca_result$x)[pca_result$x[, 1] > 10 | pca_result$x[, 1] < -10 | 
-                                    pca_result$x[, 2] > 10 | pca_result$x[, 2] < -10]
-
-outliers
-```
-
-### Cluster summaries
-
-```{r}
-# Add cluster labels to the original ZIP-to-ZIP matrix
-zip_flow_with_clusters = as.data.frame(zip_flow_matrix)
-zip_flow_with_clusters$cluster = kmeans_result$cluster
-
-# Summarize visitor flows by cluster
-cluster_summary = zip_flow_with_clusters |> 
-  group_by(cluster) |> 
-  summarise(across(everything(), mean, na.rm = TRUE))
-
-cluster_summary
-```
-
 ### Mapping
 
 ```{r}
@@ -263,4 +164,42 @@ ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
   ) +
   theme_minimal()
 ```
+
+# Modelling 
+
+## Preprocess
+
+```{r}
+library(rsample)
+zip_flow_matrix = final_df |> 
+  group_by(visitor_zip, poi_zip) |> 
+  summarize(
+    visitors_under_18 = sum(visitors_under_18, na.rm = TRUE),
+    visitors_19_65 = sum(visitors_19_65, na.rm = TRUE),
+    visitors_65_plus = sum(visitors_65_plus, na.rm = TRUE)
+  ) |> 
+  ungroup()
+
+zip_flow_matrix = zip_flow_matrix |> 
+  mutate(total_visitors = visitors_under_18 + visitors_19_65 + visitors_65_plus)
+
+set.seed(2024)
+data_split = initial_split(zip_flow_matrix, prop = 0.80)
+df_train = training(data_split)
+df_test = testing(data_split)
+```
+
+## linear model
+
+```{r}
+linear_model = train(
+  total_visitors ~ visitors_under_18 + visitors_19_65 + visitors_65_plus,
+  data = df_train,
+  method = "lm",  # Linear regression model
+  trControl = trainControl(method = "cv", number = 5)  # 5-fold cross-validation
+)
+
+summary(linear_model)
+```
+
 
