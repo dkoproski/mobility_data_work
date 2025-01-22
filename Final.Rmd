@@ -162,7 +162,9 @@ ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visito
 ```
 
 ### Mapping
-
+To do on here:
+* Get an NYC map to underlay
+* Maybe use some better colors
 ```{r}
 library(ggmap)
 
@@ -180,6 +182,36 @@ ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
   ) +
   theme_minimal()
 ```
+
+```{r}
+library(ggplot2)
+library(ggmap)
+
+# Get an OpenStreetMap base map using get_stadiamap
+osm_map <- get_stadiamap(
+  bbox = c(left = min(nyc_zip_visitors$longitude), 
+           bottom = min(nyc_zip_visitors$latitude), 
+           right = max(nyc_zip_visitors$longitude), 
+           top = max(nyc_zip_visitors$latitude)),
+  zoom = 12,
+  maptype = "alidade_smooth" # Options: "alidade_smooth", "alidade_smooth_dark", "outdoors", etc.
+)
+
+# Plot the heatmap on top of the OpenStreetMap base map
+ggmap(osm_map) +
+  stat_density_2d(data = nyc_zip_visitors, 
+                  aes(x = longitude, y = latitude, fill = ..level..), 
+                  geom = "polygon", alpha = 0.6) +
+  scale_fill_viridis_c() +
+  labs(
+    title = "Heatmap of NYC POIs by Visitor Counts",
+    x = "Longitude", 
+    y = "Latitude"
+  ) +
+  theme_minimal()
+
+```
+
 
 # Modelling 
 
