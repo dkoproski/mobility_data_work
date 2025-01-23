@@ -444,3 +444,55 @@ kruskal_test = kruskal.test(visitor_count ~ age_group, data = df_long_model_filt
 kruskal_test
 ```
 
+# Visualizations pt 2
+## Bar plot
+```{r}
+age_group_summary = df_long_model_filtered |>
+  group_by(age_group, top_category) |>
+  summarize(total_visitors = sum(visitor_count), .groups = "drop")
+
+ggplot(age_group_summary, aes(x = age_group, y = total_visitors, fill = top_category)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Visitor Counts by Age Group and Location Type",
+    x = "Age Group",
+    y = "Total Visitors",
+    fill = "Location Type"
+  ) +
+  theme_minimal()
+```
+
+## Density
+
+```{r}
+ggplot(df_long_model_filtered, aes(x = visitor_count, fill = age_group)) +
+  geom_density(alpha = 0.6) +
+  labs(
+    title = "Density of Visitor Counts by Age Group",
+    x = "Visitor Count",
+    y = "Density",
+    fill = "Age Group"
+  ) +
+  theme_minimal()
+
+```
+
+## Visitor proportions (alternative to bar plot)
+
+```{r}
+age_group_proportions = df_long_model_filtered |>
+  group_by(age_group) |>
+  summarize(total_visitors = sum(visitor_count), .groups = "drop") |>
+  mutate(proportion = total_visitors / sum(total_visitors))
+
+ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(
+    title = "Proportion of Visitors by Age Group",
+    fill = "Age Group"
+  ) +
+  theme_void()
+
+```
+
