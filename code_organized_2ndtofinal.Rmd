@@ -124,9 +124,9 @@ df_long = final_df |>
   ) |> 
   mutate(top_category = factor(top_category),
          age_group = factor(age_group, levels = c("under_18", "19_65", "65_plus")))
+
+# Data quality looks good, 2 missing zip codes may need to be handled, but data is large enough maybe dropping them won't hurt (n = 21895 vs. n = 21893)
 ```
-
-
 
 
 # Exploratory Data Analysis (EDA)
