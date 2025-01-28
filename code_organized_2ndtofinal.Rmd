@@ -1,30 +1,42 @@
 ---
-title: "Final"
-author: "Dylan Koproski & Dylan Morgan"
-date: "2024-10-29"
+title: "Code - A bit more organized"
+author: "Dylan Koproski"
+date: "2025-01-28"
 output: pdf_document
 ---
-
-* Verify that the zip matching worked properly, and check for missing zip codes
-
+# Libraries
 ```{r}
 library(tidyverse)
 library(jsonlite)
 library(readxl)
+library(rsample)
+library(caret)
+library(VGAM)
+library(COMPoissonReg)
+library(pscl)
+library(lme4)
+```
 
+
+# Preprocessing
+
+```{r}
 # Load data
 df_visitor = read_csv("mobility.csv")
 df_census = read_csv("tract_census.csv", skip = 1) |> 
   janitor::clean_names()
 df_tract_zip = read_excel("tract_zip.xlsx")
 
+
+
 # Temporary restriction to NYC
 state_county_code_str = c(36005, 36047, 36061, 36081, 36085)
 
-# Process visitor data
+# Process visitor data - none missing
 filtered_df_visitor = df_visitor |> 
   mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
   filter(first_five_digits %in% state_county_code_str) |> 
+  # Dropping missing values for home cbg
   filter(!is.na(visitor_home_aggregation)) |> 
   mutate(identifier = row_number()) |> 
   mutate(poi_zip = postal_code) |> 
@@ -37,7 +49,9 @@ filtered_df_visitor = df_visitor |>
 # Census data processing
 df_census = df_census |> 
   rowwise() |> 
-  mutate(cbg = str_sub(geography, -11))
+  mutate(cbg = str_sub(geography, -11)) |> 
+#873 locations have an estimated 0 people, we should exclude these.
+  filter(estimate_total_total_population > 0)
 
 # Age group proportions in census data
 filtered_df_census_totals = 
@@ -98,6 +112,8 @@ final_df = final_df |>
          visitors_65_plus = ceiling(visitors_65_plus)) |> 
   mutate(total_visitors = visitors_under_18 + visitors_19_65 + visitors_65_plus)
 
+# There are 2 rows in the above data that have missing values, the visitor zip is missing. We should figure out how to handle this specifically 
+
 # Long dataframe for modelling purposes
 df_long = final_df |> 
   pivot_longer(
@@ -108,13 +124,14 @@ df_long = final_df |>
   ) |> 
   mutate(top_category = factor(top_category),
          age_group = factor(age_group, levels = c("under_18", "19_65", "65_plus")))
-
 ```
 
-# Visualizing the matrix of zip code - zip code
 
-## Preliminary matrix, this guy looks bad
 
+
+# Exploratory Data Analysis (EDA)
+
+## Zip Code Flow Matrix
 ```{r}
 # Remove rows with NA in visitor_zip or poi_zip
 zip_matrix = final_df |> 
@@ -136,15 +153,12 @@ zip_matrix_plot = zip_matrix |>
   )
 ```
 
-## Tile graph of state to destination zip in NYC, a little better, at least we can see that the data isn't incredibly sparse
-
-``` {r}
-## It is so wacky to present this in a matrix, we aren't doing that
-
+## State to Destination ZIP in NYC
+```{r}
 final_df_with_state = final_df |> 
   left_join(df_tract_zip, by = c("visitor_zip" = "zip")) |> 
   rename(visitor_state = usps_zip_pref_state)
-## later things are dependent on this
+
 state_zip_matrix = final_df_with_state |> 
   group_by(visitor_state, poi_zip) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
@@ -161,19 +175,16 @@ ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visito
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 ```
 
-### Mapping
-To do on here:
-* Get an NYC map to underlay
-* Maybe use some better colors
-```{r}
-library(ggmap)
+# Visualizations
 
+## Heatmap - no basemap, just blobs. This can be improved
+```{r}
 nyc_zip_visitors = final_df |> 
   group_by(longitude, latitude) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
 
 ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
-  stat_density_2d(aes(fill = ..level..), geom = "polygon", color = NA) +
+  stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = NA) +
   scale_fill_viridis_c() +
   labs(
     title = "Heatmap of NYC POIs by Visitor Counts",
@@ -183,241 +194,91 @@ ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
   theme_minimal()
 ```
 
+# Modeling
 
-
-# Modelling 
-
-## Preprocess
-
+## Data Preparation for Modeling
 ```{r}
-# do this BEFORE SPLITTING!!!
+# Filter and prepare data for modeling
 df_long_model_filtered = df_long |> 
   filter(top_category %in% c('Drinking Places (Alcoholic Beverages)', 'Restaurants and Other Eating Places')) |> 
   drop_na()
 
-library(rsample) # for data splitting
-library(caret) # for modelling with cv
-library(VGAM)
-library(COMPoissonReg)
-library(pscl)
 set.seed(100)
 data_split = initial_split(df_long_model_filtered, prop = 0.80)
 df_train = training(data_split)
 df_test = testing(data_split)
 
-# define control
 train_control = trainControl(method = "cv", number = 10)
 ```
 
-## Poisson model
+## Model fitting
 
 ```{r}
-set.seed(100)
-poisson_model = glm(visitor_count ~ age_group, 
-                     family = poisson(link = "log"), 
-                     data = df_train)
+# Fit Poisson model
+poisson_model = glm(visitor_count ~ age_group, family = poisson(link = "log"), data = df_train)
+summary(poisson_model)
 
-s = summary(poisson_model)
+# Predictions and performance metrics
+poisson_predictions = predict(poisson_model, newdata = df_test, type = "response")
+rmse_poisson = sqrt(mean((df_test$visitor_count - poisson_predictions)^2))
+mae_poisson = mean(abs(df_test$visitor_count - poisson_predictions))
 
-predictions = predict(poisson_model, newdata = df_test, type = "response")
+cat("Poisson RMSE:", round(rmse_poisson, 2), "\n")
+cat("Poisson MAE:", round(mae_poisson, 2), "\n")
 
-rmse = sqrt(mean((df_test$visitor_count - predictions)^2))
-print(paste("RMSE:", round(rmse, 2)))
-
-
-mae = mean(abs(df_test$visitor_count - predictions))
-print(paste("MAE:", round(mae, 2)))
-
-# Create a data frame for plotting
-plot_data = data.frame(
-  Actual = df_test$visitor_count,
-  Predicted = predictions,
-  Age_Group = df_test$age_group
-)
-
-# Checking for overdispersion
+# Overdispersion check
 dispersion_parameter = sum(residuals(poisson_model, type = "pearson")^2) / poisson_model$df.residual
-print(paste("Dispersion parameter:", round(dispersion_parameter, 2)))
+dev_ratio = poisson_model$deviance / poisson_model$df.residual
+cat("Dispersion Parameter:", round(dispersion_parameter, 2), "\n")
+cat("Deviance/DF Ratio:", round(dev_ratio, 2), "\n")
 
-deviance_ratio = poisson_model$deviance / poisson_model$df.residual
-print(paste("Ratio of deviance to degrees of freedom:", round(deviance_ratio, 2)))
-
-
-pearson_resid = residuals(poisson_model, type = "pearson")
-
-# Plot residuals vs. fitted values
-plot(fitted(poisson_model), pearson_resid,
-     xlab = "Fitted Values",
-     ylab = "Pearson Residuals",
-     main = "Residuals vs. Fitted Values")
-abline(h = 0, col = "red", lty = 2)
-
-# Clustering, indicative of underdispersion
-
-# Fit the Generalized Poisson model
-genpois0_model = vglm(visitor_count ~ age_group, 
-                      family = "genpoisson0", 
-                      data = df_train)
-
-# Summary of the model
-summary(genpois0_model)
-
-
-# Fit the Generalized Poisson model
-genpois1_model = vglm(visitor_count ~ age_group, 
-                      family = "genpoisson1", 
-                      data = df_train)
-
-# Summary of the model
-summary(genpois1_model)
-
-# Fit the Generalized Poisson model
-genpois2_model = vglm(visitor_count ~ age_group, 
-                      family = "genpoisson2", 
-                      data = df_train)
-
-# Summary of the model
-summary(genpois2_model)
-
-compois_model =
-  glm.cmp(visitor_count ~ age_group, 
-          data = df_train)
-
-summary(compois_model)
-
-# Zero inflated model
-zip_model =
-  zeroinfl(visitor_count ~ age_group | age_group, 
-                      data = df_train, 
-                      dist = "poisson")
-
-# Summary of the model
-summary(zip_model)
-
-model_list = list(
-  list(name = "Poisson", model = poisson_model),
-  list(name = "GenPoisson0", model = genpois0_model),
-  list(name = "GenPoisson1", model = genpois1_model),
-  list(name = "GenPoisson2", model = genpois2_model),
-  list(name = "COM-Poisson", model = compois_model),
-  list(name = "Zero-Inflated Poisson", model = zip_model)
+# Fit other generalized models
+models = list(
+  poisson_model = glm(visitor_count ~ age_group, family = poisson(link = "log"), data = df_train),
+  GenPoisson0 = vglm(visitor_count ~ age_group, family = "genpoisson0", data = df_train),
+  GenPoisson1 = vglm(visitor_count ~ age_group, family = "genpoisson1", data = df_train),
+  GenPoisson2 = vglm(visitor_count ~ age_group, family = "genpoisson2", data = df_train),
+  COMPoisson = glm.cmp(visitor_count ~ age_group, data = df_train),
+  ZeroInflated = zeroinfl(visitor_count ~ age_group | age_group, data = df_train, dist = "poisson"),
+  mixed_poisson_model = glmer(visitor_count ~ age_group + (1 | poi_zip), data = df_long_model_filtered, family = poisson(link = "log"))
 )
+#Gen poissons, zero inflated produce warnings. good news is they perform poorly so doesn't matter anyways. com is best
 
-# Initialize vectors to store performance metrics
-model_names = c()
-rmse_values = c()
-mae_values = c()
-aic_values = c()
-bic_values = c()
-
-# Loop over each model to compute metrics
-for (model_info in model_list) {
-  model_name = model_info$name
-  model = model_info$model
-  model_names = c(model_names, model_name)
-  
-  # Generate predictions on the test data
-  if (model_name == "COM-Poisson") {
-    # For COM-Poisson model
-    predictions = predict(model, newdata = df_test, type = "response")
-  } else {
-    # For other models
-    predictions = predict(model, newdata = df_test, type = "response")
-  }
-  
-  # Calculate RMSE and MAE
+# Evaluate models
+performance_metrics = lapply(models, function(model) {
+  predictions = predict(model, newdata = df_test, type = "response")
   rmse = sqrt(mean((df_test$visitor_count - predictions)^2))
   mae = mean(abs(df_test$visitor_count - predictions))
-  rmse_values = c(rmse_values, rmse)
-  mae_values = c(mae_values, mae)
-  
-  # Calculate AIC and BIC if available
-  if (model_name == "COM-Poisson") {
-    # AIC and BIC are not directly available for COM-Poisson model
-    aic_values = c(aic_values, NA)
-    bic_values = c(bic_values, NA)
-  } else if (inherits(model, "vglm")) {
-    # For VGAM models (Generalized Poisson), use VGAM methods
-    aic = VGAM::AICvlm(model)
-    bic = VGAM::BICvlm(model)
-    aic_values = c(aic_values, aic)
-    bic_values = c(bic_values, bic)
-  } else {
-    # For other models, use standard AIC and BIC functions
-    aic = AIC(model)
-    bic = BIC(model)
-    aic_values = c(aic_values, aic)
-    bic_values = c(bic_values, bic)
-  }
-}
+  aic = tryCatch(AIC(model), error = function(e) NA)
+  bic = tryCatch(BIC(model), error = function(e) NA)
+  return(c(RMSE = rmse, MAE = mae, AIC = aic, BIC = bic))
+})
 
-# Create a data frame with performance metrics
-performance_table = data.frame(
-  Model = model_names,
-  RMSE = round(rmse_values, 2),
-  MAE = round(mae_values, 2),
-  AIC = round(aic_values, 2),
-  BIC = round(bic_values, 2)
-)
+# Convert to data frame
+performance_table = do.call(rbind, performance_metrics)
+rownames(performance_table) = names(models)
+colnames(performance_table) = c("RMSE", "MAE", "AIC", "BIC")
+print(performance_table)
 
-# Display the performance table using kable()
-knitr::kable(performance_table, caption = "Model Performance Metrics")
+# Visualization of Actual vs. Predicted (GenPoisson2 example)
+COMPoisson_predictions = predict(models$COMPoisson, newdata = df_test, type = "response")
+plot_data = data.frame(Actual = df_test$visitor_count, Predicted = COMPoisson_predictions, Age_Group = df_test$age_group)
 
-predictions = predict(genpois2_model, newdata = df_test, type = "response")
-
-# Create a data frame with actual and predicted values
-plot_data = data.frame(
-  Actual = df_test$visitor_count,
-  Predicted = predictions,
-  Age_Group = df_test$age_group
-)
-
-# Scatter plot of actual vs. predicted counts
 ggplot(plot_data, aes(x = Actual, y = Predicted, color = Age_Group)) +
   geom_jitter(width = 0.2, height = 0.2, alpha = 0.6) +
   geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
-  labs(title = "GenPoisson2 Model: Actual vs. Predicted Visitor Counts",
-       x = "Actual Visitor Count",
-       y = "Predicted Visitor Count",
-       color = "Age Group") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5))
+  labs(
+    title = "GenPoisson2 Model: Actual vs. Predicted Visitor Counts",
+    x = "Actual Visitor Count",
+    y = "Predicted Visitor Count",
+    color = "Age Group"
+  ) +
+  theme_minimal()
 ```
 
-# Mixed effects model Poisson
+# Additional Visualizations
 
-```{r}
-library(lme4)
-mixed_poisson_model = glmer(
-  visitor_count ~ age_group + (1 | poi_zip),
-  data = df_long_model_filtered,
-  family = poisson(link = "log")
-)
-
-summary(mixed_poisson_model)
-#Random effects
-# ranef(mixed_poisson_model)
-
-aic_poisson = AIC(poisson_model)
-aic_mixed = AIC(mixed_poisson_model)
-cat("Poisson Model AIC:", aic_poisson, "\n")
-cat("Mixed-Effects Model AIC:", aic_mixed, "\n")
-```
-
-# Anova to compare accross groups - preliminary, aggregates counts into means and compares those
-
-```{r}
-anova_poisson = aov(visitor_count ~ age_group, data = df_long_model_filtered)
-summary(anova_poisson)
-```
-
-```{r}
-kruskal_test = kruskal.test(visitor_count ~ age_group, data = df_long_model_filtered)
-kruskal_test
-```
-
-# Visualizations pt 2
-## Bar plot
+## Bar Plot
 ```{r}
 age_group_summary = df_long_model_filtered |>
   group_by(age_group, top_category) |>
@@ -434,22 +295,7 @@ ggplot(age_group_summary, aes(x = age_group, y = total_visitors, fill = top_cate
   theme_minimal()
 ```
 
-## Density
-
-```{r}
-ggplot(df_long_model_filtered, aes(x = visitor_count, fill = age_group)) +
-  geom_density(alpha = 0.6) +
-  labs(
-    title = "Density of Visitor Counts by Age Group",
-    x = "Visitor Count",
-    y = "Density",
-    fill = "Age Group"
-  ) +
-  theme_minimal()
-
-```
-
-## Visitor proportions (alternative to bar plot)
+## Pie chart (alternative to above)
 
 ```{r}
 age_group_proportions = df_long_model_filtered |>
@@ -468,3 +314,16 @@ ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
 
 ```
 
+## Density Plot
+
+```{r}
+ggplot(df_long_model_filtered, aes(x = visitor_count, fill = age_group)) +
+  geom_density(alpha = 0.6) +
+  labs(
+    title = "Density of Visitor Counts by Age Group",
+    x = "Visitor Count",
+    y = "Density",
+    fill = "Age Group"
+  ) +
+  theme_minimal()
+```
