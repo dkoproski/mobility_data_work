@@ -15,6 +15,8 @@ library(VGAM)
 library(COMPoissonReg)
 library(pscl)
 library(lme4)
+library(maps)
+library(zipcodeR)
 ```
 
 
@@ -44,7 +46,9 @@ filtered_df_visitor = df_visitor |>
   select(location_name, date_range_start, date_range_end, visitor_home_aggregation, top_category, identifier, poi_cbg, poi_zip, latitude, longitude) |>
   unnest_longer(visitor_home_aggregation) |>
   rename(visitor_census_tract = visitor_home_aggregation_id, visitors = visitor_home_aggregation) |> 
-  mutate(visitors = if_else(visitors == 4, 3, visitors)) 
+  mutate(visitors = if_else(visitors == 4, 3, visitors)) |> 
+  mutate(poi_lat = latitude,
+         poi_long = longitude)
 
 # Census data processing
 df_census = df_census |> 
@@ -53,7 +57,7 @@ df_census = df_census |>
 #873 locations have an estimated 0 people, we should exclude these.
   filter(estimate_total_total_population > 0)
 
-# Age group proportions in census data
+# Age group proportions in census data, separate into 3 age groups
 filtered_df_census_totals = 
   df_census |> 
   rowwise() |> 
@@ -102,8 +106,16 @@ final_df = merged_df |>
   left_join(primary_tract_zip, by = c("visitor_census_tract" = "tract")) |> 
   select(location_name, date_range_start, date_range_end, top_category, 
          identifier, poi_cbg, poi_zip, visitors, visitors_under_18, 
-         visitors_19_65, visitors_65_plus, zip, longitude, latitude) |> 
+         visitors_19_65, visitors_65_plus, zip, poi_long, poi_lat) |> 
   mutate(visitor_zip = zip)
+
+vis_zip_lat_long = geocode_zip(final_df$visitor_zip)
+
+final_df = final_df |> 
+  left_join(vis_zip_lat_long, by = join_by(visitor_zip == zipcode)) |> 
+  mutate(vis_lat = lat,
+         vis_long = lng) |> 
+  select(-lat, -lng)
 
 # Rounding, can be adjusted at will
 final_df = final_df |> 
@@ -157,6 +169,7 @@ zip_matrix_plot = zip_matrix |>
 ```{r}
 final_df_with_state = final_df |> 
   left_join(df_tract_zip, by = c("visitor_zip" = "zip")) |> 
+  select(!zip) |> 
   rename(visitor_state = usps_zip_pref_state)
 
 state_zip_matrix = final_df_with_state |> 
@@ -180,10 +193,12 @@ ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visito
 ## Heatmap - no basemap, just blobs. This can be improved
 ```{r}
 nyc_zip_visitors = final_df |> 
-  group_by(longitude, latitude) |> 
+  group_by(poi_long, poi_lat) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
 
-ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
+usa = map_data("state")
+
+ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
   stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = NA) +
   scale_fill_viridis_c() +
   labs(
@@ -194,14 +209,39 @@ ggplot(nyc_zip_visitors, aes(x = longitude, y = latitude)) +
   theme_minimal()
 ```
 
+## Flow map - work in progress
+
+```{r}
+ggplot() +
+  geom_polygon(data = usa,
+               aes(x = long, y = lat),
+               fill = "white", color = "gray50") +
+  
+  geom_segment(data = df_long,
+               aes(x = vis_long, y = vis_lat,
+                   xend = poi_long, yend = poi_lat,
+                   color = visitors),
+               alpha = 0.6, linewidth = 1) +
+  scale_color_gradient(low = "lightblue", high = "darkred") +
+  coord_map() 
+  theme_minimal() +
+  labs(color = "Volume of Visits",
+       title = "Zip Code to Zip Code Visits")
+
+```
+
+
 # Modeling
 
 ## Data Preparation for Modeling
 ```{r}
 # Filter and prepare data for modeling
+# Adjust target based on POI types of interest
+# See levels(df_long$top_category) for poi names
+target = c("Drinking Places (Alcoholic Beverages)", "Restaurants and Other Eating Places")
+
 df_long_model_filtered = df_long |> 
-  filter(top_category %in% c('Drinking Places (Alcoholic Beverages)', 'Restaurants and Other Eating Places')) |> 
-  drop_na()
+  filter(top_category %in% target)
 
 set.seed(100)
 data_split = initial_split(df_long_model_filtered, prop = 0.80)
