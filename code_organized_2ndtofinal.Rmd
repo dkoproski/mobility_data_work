@@ -196,7 +196,6 @@ nyc_zip_visitors = final_df |>
   group_by(poi_long, poi_lat) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
 
-usa = map_data("state")
 
 ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
   stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = NA) +
@@ -212,17 +211,36 @@ ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
 ## Flow map - work in progress
 
 ```{r}
+#excise visitors from hawaii
+flow_df = final_df |> 
+  filter(vis_long > -150) 
+# |> filter(total_visitors < 20)
+
+# if you want to include visitors from hawaii
+# flow_df = final_df
+
+usa = map_data("state")
+
+usa = rename(usa, state = "region")
+
+usa$state = str_to_title(usa$state)
+
+stateData = usa |> 
+  arrange(state, group, order)
+
 ggplot() +
-  geom_polygon(data = usa,
-               aes(x = long, y = lat),
+  geom_polygon(data = stateData,
+               aes(x = long, y = lat, group = group),
                fill = "white", color = "gray50") +
   
-  geom_segment(data = df_long,
+  geom_segment(data = flow_df,
                aes(x = vis_long, y = vis_lat,
                    xend = poi_long, yend = poi_lat,
-                   color = visitors),
+                   color = total_visitors),
                alpha = 0.6, linewidth = 1) +
-  scale_color_gradient(low = "lightblue", high = "darkred") +
+#  scale_color_gradient2(low = "lightblue", mid = "green", high = "darkred", midpoint = 3) +
+#  scale_color_gradientn(colors = blues9, guide = "colourbar", na.value = "gray50", space = "Lab") +
+  scale_color_distiller() +
   coord_map() 
   theme_minimal() +
   labs(color = "Volume of Visits",
