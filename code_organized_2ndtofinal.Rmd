@@ -17,6 +17,7 @@ library(pscl)
 library(lme4)
 library(maps)
 library(zipcodeR)
+library(MASS)
 ```
 
 
@@ -211,10 +212,9 @@ ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
 ## Flow map - work in progress
 
 ```{r}
-#excise visitors from hawaii
+#excise visitors from hawaii, include the second filter argument to get a better look at lower ends of data
 flow_df = final_df |> 
-  filter(vis_long > -150) 
-# |> filter(total_visitors < 20)
+  filter(vis_long > -150) #|> filter(total_visitors < 15)
 
 # if you want to include visitors from hawaii
 # flow_df = final_df
@@ -238,101 +238,254 @@ ggplot() +
                    xend = poi_long, yend = poi_lat,
                    color = total_visitors),
                alpha = 0.6, linewidth = 1) +
-#  scale_color_gradient2(low = "lightblue", mid = "green", high = "darkred", midpoint = 3) +
-#  scale_color_gradientn(colors = blues9, guide = "colourbar", na.value = "gray50", space = "Lab") +
-  scale_color_distiller() +
-  coord_map() 
+  scale_color_fermenter(name = "Total Visitors", direction = -1) +
+  coord_map() +
   theme_minimal() +
   labs(color = "Volume of Visits",
-       title = "Zip Code to Zip Code Visits")
+       title = "Zip Code to Zip Code Visits",
+       x = "Longitude",
+       y = "Latitude")
+
 
 ```
 
 
 # Modeling
 
-## Data Preparation for Modeling
-```{r}
-# Filter and prepare data for modeling
-# Adjust target based on POI types of interest
-# See levels(df_long$top_category) for poi names
-target = c("Drinking Places (Alcoholic Beverages)", "Restaurants and Other Eating Places")
-
-df_long_model_filtered = df_long |> 
-  filter(top_category %in% target)
-
-set.seed(100)
-data_split = initial_split(df_long_model_filtered, prop = 0.80)
-df_train = training(data_split)
-df_test = testing(data_split)
-
-train_control = trainControl(method = "cv", number = 10)
-```
-
-## Model fitting
+## Category definitions
 
 ```{r}
-# Fit Poisson model
-poisson_model = glm(visitor_count ~ age_group, family = poisson(link = "log"), data = df_train)
-summary(poisson_model)
-
-# Predictions and performance metrics
-poisson_predictions = predict(poisson_model, newdata = df_test, type = "response")
-rmse_poisson = sqrt(mean((df_test$visitor_count - poisson_predictions)^2))
-mae_poisson = mean(abs(df_test$visitor_count - poisson_predictions))
-
-cat("Poisson RMSE:", round(rmse_poisson, 2), "\n")
-cat("Poisson MAE:", round(mae_poisson, 2), "\n")
-
-# Overdispersion check
-dispersion_parameter = sum(residuals(poisson_model, type = "pearson")^2) / poisson_model$df.residual
-dev_ratio = poisson_model$deviance / poisson_model$df.residual
-cat("Dispersion Parameter:", round(dispersion_parameter, 2), "\n")
-cat("Deviance/DF Ratio:", round(dev_ratio, 2), "\n")
-
-# Fit other generalized models
-models = list(
-  poisson_model = glm(visitor_count ~ age_group, family = poisson(link = "log"), data = df_train),
-  GenPoisson0 = vglm(visitor_count ~ age_group, family = "genpoisson0", data = df_train),
-  GenPoisson1 = vglm(visitor_count ~ age_group, family = "genpoisson1", data = df_train),
-  GenPoisson2 = vglm(visitor_count ~ age_group, family = "genpoisson2", data = df_train),
-  COMPoisson = glm.cmp(visitor_count ~ age_group, data = df_train),
-  ZeroInflated = zeroinfl(visitor_count ~ age_group | age_group, data = df_train, dist = "poisson"),
-  mixed_poisson_model = glmer(visitor_count ~ age_group + (1 | poi_zip), data = df_long_model_filtered, family = poisson(link = "log"))
+all_cat = c(
+  "Accounting, Tax Preparation, Bookkeeping, and Payroll Services",
+  "Activities Related to Credit Intermediation",
+  "Activities Related to Real Estate",
+  "Advertising, Public Relations, and Related Services",
+  "Agencies, Brokerages, and Other Insurance Related Activities",
+  "Architectural, Engineering, and Related Services",
+  "Automotive Parts, Accessories, and Tire Stores",
+  "Automotive Repair and Maintenance",
+  "Bakeries and Tortilla Manufacturing",
+  "Beer, Wine, and Liquor Stores",
+  "Book Stores and News Dealers",
+  "Building Equipment Contractors",
+  "Building Finishing Contractors",
+  "Building Material and Supplies Dealers",
+  "Child Day Care Services",
+  "Clothing Stores",
+  "Consumer Goods Rental",
+  "Couriers and Express Delivery Services",
+  "Depository Credit Intermediation",
+  "Drinking Places (Alcoholic Beverages)",
+  "Drycleaning and Laundry Services",
+  "Electronic and Precision Equipment Repair and Maintenance",
+  "Electronics and Appliance Stores",
+  "Elementary and Secondary Schools",
+  "Florists",
+  "Furniture Stores",
+  "Gasoline Stations",
+  "General Medical and Surgical Hospitals",
+  "General Merchandise Stores, including Warehouse Clubs and Supercenters",
+  "Glass and Glass Product Manufacturing",
+  "Grocery Stores",
+  "Health and Personal Care Stores",
+  "Home Furnishings Stores",
+  "Investigation and Security Services",
+  "Jewelry, Luggage, and Leather Goods Stores",
+  "Justice, Public Order, and Safety Activities",
+  "Legal Services",
+  "Machinery, Equipment, and Supplies Merchant Wholesalers",
+  "Museums, Historical Sites, and Similar Institutions",
+  "Offices of Dentists",
+  "Offices of Other Health Practitioners",
+  "Offices of Physicians",
+  "Offices of Real Estate Agents and Brokers",
+  "Other Amusement and Recreation Industries",
+  "Other Financial Investment Activities",
+  "Other Miscellaneous Manufacturing",
+  "Other Miscellaneous Store Retailers",
+  "Other Personal Services",
+  "Other Professional, Scientific, and Technical Services",
+  "Other Schools and Instruction",
+  "Other Specialty Trade Contractors",
+  "Personal and Household Goods Repair and Maintenance",
+  "Personal Care Services",
+  "Printing and Related Support Activities",
+  "Promoters of Performing Arts, Sports, and Similar Events",
+  "Radio and Television Broadcasting",
+  "Religious Organizations",
+  "Restaurants and Other Eating Places",
+  "Shoe Stores",
+  "Sound Recording Industries",
+  "Special Food Services",
+  "Specialized Design Services",
+  "Specialty (except Psychiatric and Substance Abuse) Hospitals",
+  "Specialty Food Stores",
+  "Sporting Goods, Hobby, and Musical Instrument Stores",
+  "Support Activities for Road Transportation",
+  "Technical and Trade Schools",
+  "Transit and Ground Passenger Transportation",
+  "Traveler Accommodation",
+  "Warehousing and Storage",
+  "Wired and Wireless Telecommunications Carriers"
 )
-#Gen poissons, zero inflated produce warnings. good news is they perform poorly so doesn't matter anyways. com is best
 
-# Evaluate models
-performance_metrics = lapply(models, function(model) {
-  predictions = predict(model, newdata = df_test, type = "response")
-  rmse = sqrt(mean((df_test$visitor_count - predictions)^2))
-  mae = mean(abs(df_test$visitor_count - predictions))
-  aic = tryCatch(AIC(model), error = function(e) NA)
-  bic = tryCatch(BIC(model), error = function(e) NA)
-  return(c(RMSE = rmse, MAE = mae, AIC = aic, BIC = bic))
-})
+medical_services = c(
+  "General Medical and Surgical Hospitals",
+  "Health and Personal Care Stores",
+  "Offices of Dentists",
+  "Offices of Other Health Practitioners",
+  "Specialty (except Psychiatric and Substance Abuse) Hospitals",
+  "Offices of Physicians"
+)
 
-# Convert to data frame
-performance_table = do.call(rbind, performance_metrics)
-rownames(performance_table) = names(models)
-colnames(performance_table) = c("RMSE", "MAE", "AIC", "BIC")
-print(performance_table)
+essential_services = c(
+  "General Medical and Surgical Hospitals",
+  "Health and Personal Care Stores",
+  "Pharmacies and Drug Stores",
+  "Grocery Stores",
+  "Gasoline Stations",
+  "Depository Credit Intermediation",
+  "Public Transport Hubs",
+  "Government Offices"
+)
 
-# Visualization of Actual vs. Predicted (GenPoisson2 example)
-COMPoisson_predictions = predict(models$COMPoisson, newdata = df_test, type = "response")
-plot_data = data.frame(Actual = df_test$visitor_count, Predicted = COMPoisson_predictions, Age_Group = df_test$age_group)
+retail_shopping = c(
+  "General Merchandise Stores, including Warehouse Clubs and Supercenters",
+  "Clothing Stores",
+  "Shoe Stores",
+  "Jewelry, Luggage, and Leather Goods Stores",
+  "Electronics and Appliance Stores",
+  "Furniture Stores",
+  "Home Furnishings Stores",
+  "Specialty Food Stores",
+  "Sporting Goods, Hobby, and Musical Instrument Stores",
+  "Book Stores and News Dealers"
+)
 
-ggplot(plot_data, aes(x = Actual, y = Predicted, color = Age_Group)) +
-  geom_jitter(width = 0.2, height = 0.2, alpha = 0.6) +
-  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
-  labs(
-    title = "GenPoisson2 Model: Actual vs. Predicted Visitor Counts",
-    x = "Actual Visitor Count",
-    y = "Predicted Visitor Count",
-    color = "Age Group"
-  ) +
-  theme_minimal()
+entertainment_recreation = c(
+  "Other Amusement and Recreation Industries",
+  "Museums, Historical Sites, and Similar Institutions",
+  "Promoters of Performing Arts, Sports, and Similar Events",
+  "Radio and Television Broadcasting",
+  "Sound Recording Industries"
+)
+
+personal_services = c(
+  "Personal Care Services",
+  "Drycleaning and Laundry Services",
+  "Other Personal Services",
+  "Personal and Household Goods Repair and Maintenance"
+)
+
+hospitality_lodging = c(
+  "Traveler Accommodation",
+  "Bed and Breakfast Inns",
+  "Resorts",
+  "Extended Stay Hotels"
+)
+
+office_professional = c(
+  "Accounting, Tax Preparation, Bookkeeping, and Payroll Services",
+  "Legal Services",
+  "Architectural, Engineering, and Related Services",
+  "Agencies, Brokerages, and Other Insurance Related Activities",
+  "Offices of Physicians",
+  "Offices of Dentists",
+  "Offices of Other Health Practitioners",
+  "Real Estate Agencies"
+)
+
+
+target_categories = c("Drinking Places (Alcoholic Beverages)", "Restaurants and Other Eating Places", "Beer, Wine, and Liquor Stores")
 ```
+
+## All categories vs. categories of interest
+
+```{r}
+df_long_model_filtered_1 = df_long |> 
+  mutate(non_restaurant = if_else(top_category %in% target_categories, "No", "Yes"))
+
+poisson_model_interact_1 = glm(visitor_count ~ age_group * non_restaurant, family = poisson(link = "log"), data = df_long_model_filtered_1)
+summary(poisson_model_interact_1)
+
+dispersion_test = sum(residuals(poisson_model_interact_1, type = "pearson")^2) / poisson_model_interact_1$df.residual
+print(dispersion_test)
+
+#Overdispersion present, use NB
+
+```
+
+## Healthcare categories vs. categories of interest
+
+```{r}
+df_long_model_filtered_2 = df_long |> 
+  filter(top_category %in% c(target_categories, medical_services)) |> 
+  mutate(essential = if_else(top_category %in% target_categories, "No", "Yes"))
+
+poisson_model_interact_2 = glm(visitor_count ~ age_group * essential, family = poisson(link = "log"), data = df_long_model_filtered_2)
+summary(poisson_model_interact_2)
+```
+
+## NB models, overdispersion was present
+
+```{r}
+run_nb_model = function(df, category_name, category_vector, reference_name) {
+  df_model = df |> 
+    mutate(category_indicator = if_else(top_category %in% category_vector, reference_name, category_name))
+  
+  nb_model = glm.nb(visitor_count ~ age_group * category_indicator, data = df_model)
+
+  print(summary(nb_model))
+  
+  return(nb_model)
+}
+
+# Run models for each category comparison
+nb_model_1 = run_nb_model(df_long, "Non-Restaurant", target_categories, "Restaurant/Bar")
+
+nb_model_2 = run_nb_model(df_long, "Healthcare", medical_services, "Restaurant/Bar")
+
+nb_model_3 = run_nb_model(df_long, "Essential Services", essential_services, "Restaurant/Bar")
+
+nb_model_4 = run_nb_model(df_long, "Retail Shopping", retail_shopping, "Restaurant/Bar")
+
+nb_model_5 = run_nb_model(df_long, "Entertainment/Recreation", entertainment_recreation, "Restaurant/Bar")
+
+nb_model_6 = run_nb_model(df_long, "Personal Services", personal_services, "Restaurant/Bar")
+
+nb_model_7 = run_nb_model(df_long, "Hospitality/Lodging", hospitality_lodging, "Restaurant/Bar")
+
+nb_model_8 = run_nb_model(df_long, "Office/Professional", office_professional, "Restaurant/Bar")
+
+```
+
+## NB result extraction
+
+```{r}
+extract_nb_results = function(model, category_name) {
+  results = broom.mixed::tidy(model) |> 
+    filter(grepl("Intercept|age_group|category_indicator", term)) |> 
+    mutate(category = category_name) |> 
+    relocate(category)
+  
+  return(results)
+}
+
+nb_summary_table = bind_rows(
+  extract_nb_results(nb_model_1, "Non-Restaurant"),
+  extract_nb_results(nb_model_2, "Healthcare"),
+  extract_nb_results(nb_model_3, "Essential Services"),
+  extract_nb_results(nb_model_4, "Retail Shopping"),
+  extract_nb_results(nb_model_5, "Entertainment/Recreation"),
+  extract_nb_results(nb_model_6, "Personal Services"),
+  extract_nb_results(nb_model_7, "Hospitality/Lodging"),
+  extract_nb_results(nb_model_8, "Office/Professional")
+)
+
+knitr::kable(nb_summary_table)
+
+```
+
 
 # Additional Visualizations
 
@@ -371,6 +524,7 @@ ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
   theme_void()
 
 ```
+
 
 ## Density Plot
 

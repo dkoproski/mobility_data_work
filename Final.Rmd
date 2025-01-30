@@ -468,3 +468,87 @@ ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
 
 ```
 
+## Old modelling code: 
+
+## Data Preparation for Modeling
+```{r}
+# Filter and prepare data for modeling
+# Adjust target based on POI types of interest
+# See levels(df_long$top_category) for poi names
+target = c("Drinking Places (Alcoholic Beverages)", "Restaurants and Other Eating Places")
+
+df_long_model_filtered = df_long |> 
+  filter(top_category %in% target)
+
+set.seed(100)
+data_split = initial_split(df_long_model_filtered, prop = 0.80)
+df_train = training(data_split)
+df_test = testing(data_split)
+
+train_control = trainControl(method = "cv", number = 10)
+```
+
+## Model fitting - old
+
+```{r}
+# Fit Poisson model
+poisson_model = glm(visitor_count ~ age_group, family = poisson(link = "log"), data = df_train)
+summary(poisson_model)
+
+# Predictions and performance metrics
+poisson_predictions = predict(poisson_model, newdata = df_test, type = "response")
+rmse_poisson = sqrt(mean((df_test$visitor_count - poisson_predictions)^2))
+mae_poisson = mean(abs(df_test$visitor_count - poisson_predictions))
+
+cat("Poisson RMSE:", round(rmse_poisson, 2), "\n")
+cat("Poisson MAE:", round(mae_poisson, 2), "\n")
+
+# Overdispersion check
+dispersion_parameter = sum(residuals(poisson_model, type = "pearson")^2) / poisson_model$df.residual
+dev_ratio = poisson_model$deviance / poisson_model$df.residual
+cat("Dispersion Parameter:", round(dispersion_parameter, 2), "\n")
+cat("Deviance/DF Ratio:", round(dev_ratio, 2), "\n")
+
+# Fit other generalized models
+models = list(
+  poisson_model = glm(visitor_count ~ age_group, family = poisson(link = "log"), data = df_train),
+  GenPoisson0 = vglm(visitor_count ~ age_group, family = "genpoisson0", data = df_train),
+  GenPoisson1 = vglm(visitor_count ~ age_group, family = "genpoisson1", data = df_train),
+  GenPoisson2 = vglm(visitor_count ~ age_group, family = "genpoisson2", data = df_train),
+  COMPoisson = glm.cmp(visitor_count ~ age_group, data = df_train),
+  ZeroInflated = zeroinfl(visitor_count ~ age_group | age_group, data = df_train, dist = "poisson"),
+  mixed_poisson_model = glmer(visitor_count ~ age_group + (1 | poi_zip), data = df_long_model_filtered, family = poisson(link = "log"))
+)
+#Gen poissons, zero inflated produce warnings. good news is they perform poorly so doesn't matter anyways. com is best
+
+# Evaluate models
+performance_metrics = lapply(models, function(model) {
+  predictions = predict(model, newdata = df_test, type = "response")
+  rmse = sqrt(mean((df_test$visitor_count - predictions)^2))
+  mae = mean(abs(df_test$visitor_count - predictions))
+  aic = tryCatch(AIC(model), error = function(e) NA)
+  bic = tryCatch(BIC(model), error = function(e) NA)
+  return(c(RMSE = rmse, MAE = mae, AIC = aic, BIC = bic))
+})
+
+# Convert to data frame
+performance_table = do.call(rbind, performance_metrics)
+rownames(performance_table) = names(models)
+colnames(performance_table) = c("RMSE", "MAE", "AIC", "BIC")
+print(performance_table)
+
+# Visualization of Actual vs. Predicted (GenPoisson2 example)
+COMPoisson_predictions = predict(models$COMPoisson, newdata = df_test, type = "response")
+plot_data = data.frame(Actual = df_test$visitor_count, Predicted = COMPoisson_predictions, Age_Group = df_test$age_group)
+
+ggplot(plot_data, aes(x = Actual, y = Predicted, color = Age_Group)) +
+  geom_jitter(width = 0.2, height = 0.2, alpha = 0.6) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "black") +
+  labs(
+    title = "GenPoisson2 Model: Actual vs. Predicted Visitor Counts",
+    x = "Actual Visitor Count",
+    y = "Predicted Visitor Count",
+    color = "Age Group"
+  ) +
+  theme_minimal()
+```
