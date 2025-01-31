@@ -484,6 +484,37 @@ nb_summary_table = bind_rows(
 
 knitr::kable(nb_summary_table)
 
+
+```
+
+```{r}
+extract_nb_results = function(model, category_name) {
+  results = broom.mixed::tidy(model) |> 
+    filter(grepl("category_indicator", term)) |> 
+    mutate(category = category_name) |> 
+    relocate(category) |> 
+    mutate(significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    ))
+  
+  return(results)
+}
+
+nb_summary_table = bind_rows(
+  extract_nb_results(nb_model_1, "Non-Restaurant"),
+  extract_nb_results(nb_model_2, "Healthcare"),
+  extract_nb_results(nb_model_3, "Essential Services"),
+  extract_nb_results(nb_model_4, "Retail Shopping"),
+  extract_nb_results(nb_model_5, "Entertainment/Recreation"),
+  extract_nb_results(nb_model_6, "Personal Services"),
+  extract_nb_results(nb_model_7, "Hospitality/Lodging"),
+  extract_nb_results(nb_model_8, "Office/Professional")
+)
+
+knitr::kable(nb_summary_table)
 ```
 
 
