@@ -15,9 +15,12 @@ library(VGAM)
 library(COMPoissonReg)
 library(pscl)
 library(lme4)
-library(maps)
 library(zipcodeR)
+library(maps)
 library(MASS)
+conflicted::conflict_prefer("select", "dplyr")
+conflicted::conflict_prefer("map", "purrr")
+conflicted::conflict_prefer("filter", "dplyr")
 ```
 
 
@@ -427,11 +430,30 @@ summary(poisson_model_interact_2)
 ```
 
 ## NB models, overdispersion was present
+### NB model on whole data
+"Are older individuals visiting restaurants/bars at lower rates compared to other age groups?"
+A negative estimate implies that an age group is visiting a location at a lower rate than the reference
+```{r}
+nb_whole = glm.nb(visitor_count ~ age_group, data = df_long)
+summary(nb_whole)
+
+
+df_model_filtered = df_long |> 
+  filter(top_category %in% target_categories)
+
+nb_rest = glm.nb(visitor_count ~ age_group, data = df_model_filtered)
+summary(nb_rest)
+```
+
+
+### NB with interaction
+"Are older individuals visiting restaurants/bars at lower rates compared to other location types?"
 
 ```{r}
-run_nb_model = function(df, category_name, category_vector, reference_name) {
+run_nb_model = function(df, category_name, category_vector, reference_name, target_categories) {
   df_model = df |> 
-    mutate(category_indicator = if_else(top_category %in% category_vector, reference_name, category_name))
+    filter(top_category %in% c(target_categories, category_vector)) |>  # Filter to only relevant POIs
+    mutate(category_indicator = if_else(top_category %in% target_categories, reference_name, category_name))
   
   nb_model = glm.nb(visitor_count ~ age_group * category_indicator, data = df_model)
 
@@ -440,52 +462,41 @@ run_nb_model = function(df, category_name, category_vector, reference_name) {
   return(nb_model)
 }
 
-# Run models for each category comparison
-nb_model_1 = run_nb_model(df_long, "Non-Restaurant", target_categories, "Restaurant/Bar")
+# All groups v. restaurant and bar
+nb_model_1 = run_nb_model(df_long, "Non-Restaurant", all_cat, "Restaurant/Bar", target_categories)
 
-nb_model_2 = run_nb_model(df_long, "Healthcare", medical_services, "Restaurant/Bar")
+# Healthcare v. restaurant and bar
+nb_model_2 = run_nb_model(df_long, "Healthcare", medical_services, "Restaurant/Bar", target_categories)
 
-nb_model_3 = run_nb_model(df_long, "Essential Services", essential_services, "Restaurant/Bar")
+# Essential Services v. restaurant and bar
+nb_model_3 = run_nb_model(df_long, "Essential Services", essential_services, "Restaurant/Bar", target_categories)
 
-nb_model_4 = run_nb_model(df_long, "Retail Shopping", retail_shopping, "Restaurant/Bar")
+# Retail shopping v. restaurant and bar
+nb_model_4 = run_nb_model(df_long, "Retail Shopping", retail_shopping, "Restaurant/Bar", target_categories)
 
-nb_model_5 = run_nb_model(df_long, "Entertainment/Recreation", entertainment_recreation, "Restaurant/Bar")
+# Entertainment/Recreation v. restaurant and bar
+nb_model_5 = run_nb_model(df_long, "Entertainment/Recreation", entertainment_recreation, "Restaurant/Bar", target_categories)
 
-nb_model_6 = run_nb_model(df_long, "Personal Services", personal_services, "Restaurant/Bar")
+# Personal Services v. restaurant and bar
+nb_model_6 = run_nb_model(df_long, "Personal Services", personal_services, "Restaurant/Bar", target_categories)
 
-nb_model_7 = run_nb_model(df_long, "Hospitality/Lodging", hospitality_lodging, "Restaurant/Bar")
+#Hospitality/Lodging v. restaurant and bar
+nb_model_7 = run_nb_model(df_long, "Hospitality/Lodging", hospitality_lodging, "Restaurant/Bar", target_categories)
 
-nb_model_8 = run_nb_model(df_long, "Office/Professional", office_professional, "Restaurant/Bar")
+#Office/Professional v. restaurant and bar
+nb_model_8 = run_nb_model(df_long, "Office/Professional", office_professional, "Restaurant/Bar", target_categories)
 
 ```
-
-## NB result extraction
 
 ```{r}
-extract_nb_results = function(model, category_name) {
-  results = broom.mixed::tidy(model) |> 
-    filter(grepl("Intercept|age_group|category_indicator", term)) |> 
-    mutate(category = category_name) |> 
-    relocate(category)
+  df_model = df_long |> 
+    filter(top_category %in% c(target_categories, medical_services)) |>  # Filter to only relevant POIs
+    mutate(category_indicator = if_else(top_category %in% target_categories, "rest/bar", "med"))
   
-  return(results)
-}
-
-nb_summary_table = bind_rows(
-  extract_nb_results(nb_model_1, "Non-Restaurant"),
-  extract_nb_results(nb_model_2, "Healthcare"),
-  extract_nb_results(nb_model_3, "Essential Services"),
-  extract_nb_results(nb_model_4, "Retail Shopping"),
-  extract_nb_results(nb_model_5, "Entertainment/Recreation"),
-  extract_nb_results(nb_model_6, "Personal Services"),
-  extract_nb_results(nb_model_7, "Hospitality/Lodging"),
-  extract_nb_results(nb_model_8, "Office/Professional")
-)
-
-knitr::kable(nb_summary_table)
-
-
+  nb_model = glm.nb(visitor_count ~ age_group * category_indicator, data = df_model)
+  summary(nb_model)
 ```
+
 
 ```{r}
 extract_nb_results = function(model, category_name) {
@@ -522,7 +533,7 @@ knitr::kable(nb_summary_table)
 
 ## Bar Plot
 ```{r}
-age_group_summary = df_long_model_filtered |>
+age_group_summary = df_long_model_filtered_1 |>
   group_by(age_group, top_category) |>
   summarize(total_visitors = sum(visitor_count), .groups = "drop")
 
@@ -540,7 +551,7 @@ ggplot(age_group_summary, aes(x = age_group, y = total_visitors, fill = top_cate
 ## Pie chart (alternative to above)
 
 ```{r}
-age_group_proportions = df_long_model_filtered |>
+age_group_proportions = df_long_model_filtered_1 |>
   group_by(age_group) |>
   summarize(total_visitors = sum(visitor_count), .groups = "drop") |>
   mutate(proportion = total_visitors / sum(total_visitors))
@@ -560,7 +571,7 @@ ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
 ## Density Plot
 
 ```{r}
-ggplot(df_long_model_filtered, aes(x = visitor_count, fill = age_group)) +
+ggplot(df_long_model_filtered_1, aes(x = visitor_count, fill = age_group)) +
   geom_density(alpha = 0.6) +
   labs(
     title = "Density of Visitor Counts by Age Group",
