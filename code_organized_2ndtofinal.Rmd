@@ -418,16 +418,6 @@ print(dispersion_test)
 
 ```
 
-## Healthcare categories vs. categories of interest
-
-```{r}
-df_long_model_filtered_2 = df_long |> 
-  filter(top_category %in% c(target_categories, medical_services)) |> 
-  mutate(essential = if_else(top_category %in% target_categories, "No", "Yes"))
-
-poisson_model_interact_2 = glm(visitor_count ~ age_group * essential, family = poisson(link = "log"), data = df_long_model_filtered_2)
-summary(poisson_model_interact_2)
-```
 
 ## NB models, overdispersion was present
 ### NB model on whole data
@@ -486,15 +476,6 @@ nb_model_7 = run_nb_model(df_long, "Hospitality/Lodging", hospitality_lodging, "
 #Office/Professional v. restaurant and bar
 nb_model_8 = run_nb_model(df_long, "Office/Professional", office_professional, "Restaurant/Bar", target_categories)
 
-```
-
-```{r}
-  df_model = df_long |> 
-    filter(top_category %in% c(target_categories, medical_services)) |>  # Filter to only relevant POIs
-    mutate(category_indicator = if_else(top_category %in% target_categories, "rest/bar", "med"))
-  
-  nb_model = glm.nb(visitor_count ~ age_group * category_indicator, data = df_model)
-  summary(nb_model)
 ```
 
 
