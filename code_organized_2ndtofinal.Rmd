@@ -192,6 +192,7 @@ ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visito
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
 ```
 
+
 # Visualizations
 
 ## Heatmap - no basemap, just blobs. This can be improved
@@ -511,6 +512,50 @@ knitr::kable(nb_summary_table)
 
 
 # Additional Visualizations
+
+## Visitor counts
+
+```{r}
+state_visitors = final_df_with_state |> 
+  filter(visitor_state != "NY") |> 
+  filter(visitor_state != "NJ") |> 
+  group_by(visitor_state) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
+  arrange(desc(total_visitors))
+
+ggplot(state_visitors, aes(x = reorder(visitor_state, -total_visitors), y = total_visitors)) +
+  geom_col(fill = "steelblue") +
+  labs(
+    title = "Total Visitors by State",
+    x = "State",
+    y = "Total Visitors"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+## Map view of visitor counts
+
+```{r}
+library(usmap)
+library(scales)
+
+# Aggregate visitor counts by state
+state_visitors_map = final_df_with_state |> 
+  group_by(visitor_state) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
+  filter(!is.na(visitor_state)) |> 
+  mutate(log_visitors = log1p(total_visitors)) |> 
+  rename(state = visitor_state)
+
+# Plot using log scale
+plot_usmap(data = state_visitors_map, regions = "states", values = "log_visitors") +
+  scale_fill_viridis_c(name = "Log Visitors", option = "magma") +
+  labs(title = "Log-Scaled Visitor Counts by State") +
+  theme_minimal()
+
+```
+
 
 ## Bar Plot
 ```{r}
