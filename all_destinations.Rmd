@@ -44,7 +44,7 @@ state_county_code_str = c(36005, 36047, 36061, 36081, 36085)
 # Process visitor data - none missing
 filtered_df_visitor = df_visitor |> 
   mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
-  filter(first_five_digits %in% state_county_code_str) |> 
+ # filter(first_five_digits %in% state_county_code_str) |> 
   # Dropping missing values for home cbg
   filter(!is.na(visitor_home_aggregation)) |> 
   mutate(identifier = row_number()) |> 
@@ -151,7 +151,7 @@ df_long = final_df |>
 # Exploratory Data Analysis (EDA)
 
 ## Zip Code Flow Matrix
-```{r}
+```{r, eval = FALSE}
 # Remove rows with NA in visitor_zip or poi_zip
 zip_matrix = final_df |> 
   filter(!is.na(visitor_zip) & !is.na(poi_zip)) |> 
@@ -457,6 +457,10 @@ run_nb_model = function(df, category_name, category_vector, reference_name, targ
   return(nb_model)
 }
 
+
+  df_model = df_long |> 
+    filter(top_category %in% c(target_categories, all_cat)) |>  # Filter to only relevant POIs
+    mutate(category_indicator = if_else(top_category %in% target_categories, "Restaurant/Bar", "Non-Restaurant"))
 
 # All groups v. restaurant and bar
 nb_model_1 = run_nb_model(df_long, "Non-Restaurant", all_cat, "Restaurant/Bar", target_categories)
