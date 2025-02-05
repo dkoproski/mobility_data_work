@@ -18,6 +18,9 @@ library(lme4)
 library(zipcodeR)
 library(maps)
 library(MASS)
+library(usmap)
+library(scales)
+
 conflicted::conflict_prefer("select", "dplyr")
 conflicted::conflict_prefer("map", "purrr")
 conflicted::conflict_prefer("filter", "dplyr")
@@ -537,9 +540,6 @@ ggplot(state_visitors, aes(x = reorder(visitor_state, -total_visitors), y = tota
 ## Map view of visitor counts
 
 ```{r}
-library(usmap)
-library(scales)
-
 # Aggregate visitor counts by state
 state_visitors_map = final_df_with_state |> 
   group_by(visitor_state) |> 
