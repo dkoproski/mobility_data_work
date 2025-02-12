@@ -148,117 +148,6 @@ df_long = final_df |>
 ```
 
 
-# Exploratory Data Analysis (EDA)
-
-## Zip Code Flow Matrix
-```{r, eval = FALSE}
-# Remove rows with NA in visitor_zip or poi_zip
-zip_matrix = final_df |> 
-  filter(!is.na(visitor_zip) & !is.na(poi_zip)) |> 
-  group_by(visitor_zip, poi_zip) |> 
-  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
-  pivot_wider(names_from = poi_zip, values_from = total_visitors, values_fill = 0)
-
-# Convert to matrix and plot
-zip_matrix_plot = zip_matrix |> 
-  column_to_rownames("visitor_zip") |> 
-  as.matrix() |> 
-  heatmap(
-    col = colorRampPalette(c("white", "red"))(100),
-    scale = "none",
-    main = "Zip-to-Zip Visitor Flow",
-    xlab = "Destination ZIP (To)",
-    ylab = "Origin ZIP (From)"
-  )
-```
-
-## State to Destination ZIP in NYC
-```{r}
-final_df_with_state = final_df |> 
-  left_join(df_tract_zip, by = c("visitor_zip" = "zip")) |> 
-  select(!zip) |> 
-  rename(visitor_state = usps_zip_pref_state)
-
-state_zip_matrix = final_df_with_state |> 
-  group_by(visitor_state, poi_zip) |> 
-  summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
-
-ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visitors)) + 
-  geom_tile() + 
-  scale_fill_viridis_c() + 
-  labs(
-    title = "State-to-NYC ZIP Code Visitor Flow",
-    x = "Destination ZIP (NYC)",
-    y = "Origin State"
-  ) + 
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
-```
-
-
-# Visualizations
-
-## Heatmap - no basemap, just blobs. This can be improved
-```{r}
-nyc_zip_visitors = final_df |> 
-  group_by(poi_long, poi_lat) |> 
-  summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
-
-
-ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
-  stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = NA) +
-  scale_fill_viridis_c() +
-  labs(
-    title = "Heatmap of NYC POIs by Visitor Counts",
-    x = "Longitude", 
-    y = "Latitude"
-  ) +
-  theme_minimal()
-```
-
-## Flow map - work in progress
-
-```{r}
-#excise visitors from hawaii, include the second filter argument to get a better look at lower ends of data
-flow_df = final_df |> 
-  filter(vis_long > -150) #|> filter(total_visitors < 15)
-
-# if you want to include visitors from hawaii
-# flow_df = final_df
-
-usa = map_data("state")
-
-usa = rename(usa, state = "region")
-
-usa$state = str_to_title(usa$state)
-
-stateData = usa |> 
-  arrange(state, group, order)
-
-ggplot() +
-  geom_polygon(data = stateData,
-               aes(x = long, y = lat, group = group),
-               fill = "white", color = "gray50") +
-  
-  geom_segment(data = flow_df,
-               aes(x = vis_long, y = vis_lat,
-                   xend = poi_long, yend = poi_lat,
-                   color = total_visitors),
-               alpha = 0.6, linewidth = 1) +
-  scale_color_fermenter(name = "Total Visitors", direction = -1) +
-  coord_map() +
-  theme_minimal() +
-  labs(color = "Volume of Visits",
-       title = "Zip Code to Zip Code Visits",
-       x = "Longitude",
-       y = "Latitude")
-
-
-```
-
-
-# Modeling
-
 ## Category definitions
 
 ```{r}
@@ -404,7 +293,288 @@ office_professional = c(
 
 
 target_categories = c("Drinking Places (Alcoholic Beverages)", "Restaurants and Other Eating Places", "Beer, Wine, and Liquor Stores")
+
 ```
+
+# Exploratory Data Analysis (EDA)
+
+## Zip Code Flow Matrix
+```{r}
+# Remove rows with NA in visitor_zip or poi_zip
+zip_matrix = final_df |> 
+  filter(!is.na(visitor_zip) & !is.na(poi_zip)) |> 
+  group_by(visitor_zip, poi_zip) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
+  pivot_wider(names_from = poi_zip, values_from = total_visitors, values_fill = 0)
+```
+```{r, eval = FALSE}
+# Convert to matrix and plot
+zip_matrix_plot = zip_matrix |> 
+  column_to_rownames("visitor_zip") |> 
+  as.matrix() |> 
+  heatmap(
+    col = colorRampPalette(c("white", "red"))(100),
+    scale = "none",
+    main = "Zip-to-Zip Visitor Flow",
+    xlab = "Destination ZIP (To)",
+    ylab = "Origin ZIP (From)"
+  )
+```
+
+## State to Destination ZIP in NYC
+```{r}
+final_df_with_state = final_df |> 
+  left_join(df_tract_zip, by = c("visitor_zip" = "zip")) |> 
+  select(!zip) |> 
+  rename(visitor_state = usps_zip_pref_state)
+
+state_zip_matrix = final_df_with_state |> 
+  group_by(visitor_state, poi_zip) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
+
+ggplot(state_zip_matrix, aes(x = poi_zip, y = visitor_state, fill = total_visitors)) + 
+  geom_tile() + 
+  scale_fill_viridis_c() + 
+  labs(
+    title = "State-to-NYC ZIP Code Visitor Flow",
+    x = "Destination ZIP (NYC)",
+    y = "Origin State"
+  ) + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))
+```
+
+
+```{r, eval = FALSE}
+nyc_zip_visitors = final_df |> 
+  group_by(poi_long, poi_lat) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) 
+
+
+ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
+  stat_density_2d(aes(fill = after_stat(level)), geom = "polygon", color = NA) +
+  scale_fill_viridis_c() +
+  labs(
+    title = "Heatmap of NYC POIs by Visitor Counts",
+    x = "Longitude", 
+    y = "Latitude"
+  ) +
+  theme_minimal()
+```
+
+## Flow map - work in progress
+
+```{r}
+#excise visitors from hawaii, include the second filter argument to get a better look at lower ends of data
+flow_df = final_df |> 
+  filter(vis_long > -150) |> 
+  filter(poi_long > -150) |> 
+  filter(vis_lat < 60) |> 
+  filter(poi_lat < 50) |> 
+  left_join(df_tract_zip, by = c("visitor_zip" = "zip"), multiple = "any") |> 
+  select(!zip) |> 
+  rename(visitor_state = usps_zip_pref_state) |> 
+  left_join(df_tract_zip, by = c("poi_zip" = "zip"), multiple = "any") |> 
+  rename(poi_state = usps_zip_pref_state) |> filter(poi_state == "TN")
+
+# if you want to include visitors from hawaii
+# flow_df = final_df
+
+usa = map_data("state")
+
+usa = rename(usa, state = "region")
+
+usa$state = str_to_title(usa$state)
+
+stateData = usa |> 
+  arrange(state, group, order)
+
+ggplot() +
+  geom_polygon(data = stateData,
+               aes(x = long, y = lat, group = group),
+               fill = "white", color = "gray50") +
+  
+  geom_segment(data = flow_df,
+               aes(x = vis_long, y = vis_lat,
+                   xend = poi_long, yend = poi_lat,
+                   color = total_visitors),
+               alpha = 0.6, linewidth = 1) +
+  scale_color_fermenter(name = "Total Visitors", direction = -1) +
+  coord_map() +
+  theme_minimal() +
+  labs(color = "Volume of Visits",
+       title = "Zip Code to Zip Code Visits",
+       x = "Longitude",
+       y = "Latitude")
+
+
+```
+
+## Visitor counts
+
+```{r}
+state_visitors = final_df_with_state |> 
+  filter(visitor_state != "NY") |> 
+  filter(visitor_state != "NJ") |> 
+  group_by(visitor_state) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
+  arrange(desc(total_visitors))
+
+ggplot(state_visitors, aes(x = reorder(visitor_state, -total_visitors), y = total_visitors)) +
+  geom_col(fill = "steelblue") +
+  labs(
+    title = "Total Visitors by State",
+    x = "State",
+    y = "Total Visitors"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+## Map view of visitor counts
+
+```{r}
+# Aggregate visitor counts by state
+state_visitors_map = final_df_with_state |> 
+  group_by(visitor_state) |> 
+  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
+  filter(!is.na(visitor_state)) |> 
+  mutate(log_visitors = log1p(total_visitors)) |> 
+  rename(state = visitor_state)
+
+# Plot using log scale
+plot_usmap(data = state_visitors_map, regions = "states", values = "log_visitors") +
+  scale_fill_viridis_c(name = "Log Visitors", option = "magma") +
+  labs(title = "Log-Scaled Visitor Counts by State") +
+  theme_minimal()
+
+```
+
+```{r}
+# Function to create bar plots for each category
+plot_age_group_counts = function(df, category_name, category_vector) {
+  df_filtered = df |> 
+    filter(top_category %in% category_vector) |> 
+    group_by(age_group) |> 
+    summarize(total_visitors = sum(visitor_count, na.rm = TRUE), .groups = "drop")
+  
+  ggplot(df_filtered, aes(x = age_group, y = total_visitors)) +
+    geom_col(fill = "steelblue") +
+    labs(
+      title = paste("Visitor Counts by Age Group -", category_name),
+      x = "Age Group",
+      y = "Total Visitors"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      legend.position = "none"  # Remove legend
+    )
+}
+
+# Generate bar plots for each category
+plot_age_group_counts(df_long, "All", all_cat)
+plot_age_group_counts(df_long, "Healthcare", medical_services)
+plot_age_group_counts(df_long, "Essential Services", essential_services)
+plot_age_group_counts(df_long, "Retail Shopping", retail_shopping)
+plot_age_group_counts(df_long, "Entertainment/Recreation", entertainment_recreation)
+plot_age_group_counts(df_long, "Personal Services", personal_services)
+plot_age_group_counts(df_long, "Hospitality/Lodging", hospitality_lodging)
+plot_age_group_counts(df_long, "Office/Professional", office_professional)
+plot_age_group_counts(df_long, "Restaurant/Bar", target_categories)
+
+```
+
+```{r}
+# Aggregate visitor counts by age group and POI category
+df_filtered = df_long |> 
+  mutate(category_group = case_when(
+    top_category %in% medical_services ~ "Healthcare",
+    top_category %in% essential_services ~ "Essential Services",
+    top_category %in% retail_shopping ~ "Retail Shopping",
+    top_category %in% entertainment_recreation ~ "Entertainment/Recreation",
+    top_category %in% personal_services ~ "Personal Services",
+    top_category %in% hospitality_lodging ~ "Hospitality/Lodging",
+    top_category %in% office_professional ~ "Office/Professional",
+    top_category %in% target_categories ~ "Restaurant/Bar",
+    TRUE ~ "Other"
+  )) |> 
+  filter(category_group != "Other") |>  # Exclude any unintended categories
+  group_by(category_group, age_group) |> 
+  summarize(total_visitors = sum(visitor_count, na.rm = TRUE), .groups = "drop")
+
+# Create stacked bar plot
+ggplot(df_filtered, aes(x = category_group, y = total_visitors, fill = age_group)) +
+  geom_col(position = "stack") +
+  labs(
+    title = "Visitor Counts by POI Category and Age Group",
+    x = "POI Category",
+    y = "Total Visitors",
+    fill = "Age Group"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels for readability
+    legend.position = "right"  # Keep legend for age group colors
+  )
+
+```
+
+
+## Bar Plot
+```{r}
+age_group_summary = df_long_model_filtered_1 |>
+  group_by(age_group, top_category) |>
+  summarize(total_visitors = sum(visitor_count), .groups = "drop")
+
+ggplot(age_group_summary, aes(x = age_group, y = total_visitors, fill = top_category)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Visitor Counts by Age Group and Location Type",
+    x = "Age Group",
+    y = "Total Visitors",
+    fill = "Location Type"
+  ) +
+  theme_minimal()
+```
+
+## Pie chart (alternative to above)
+
+```{r}
+age_group_proportions = df_long_model_filtered_1 |>
+  group_by(age_group) |>
+  summarize(total_visitors = sum(visitor_count), .groups = "drop") |>
+  mutate(proportion = total_visitors / sum(total_visitors))
+
+ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  labs(
+    title = "Proportion of Visitors by Age Group",
+    fill = "Age Group"
+  ) +
+  theme_void()
+
+```
+
+
+## Density Plot
+
+```{r}
+ggplot(df_long_model_filtered_1, aes(x = visitor_count, fill = age_group)) +
+  geom_density(alpha = 0.6) +
+  labs(
+    title = "Density of Visitor Counts by Age Group",
+    x = "Visitor Count",
+    y = "Density",
+    fill = "Age Group"
+  ) +
+  theme_minimal()
+```
+
+# Modeling
+
+
 
 ## All categories vs. categories of interest
 
@@ -448,19 +618,16 @@ run_nb_model = function(df, category_name, category_vector, reference_name, targ
   df_model = df |> 
     filter(top_category %in% c(target_categories, category_vector)) |>  # Filter to only relevant POIs
     mutate(category_indicator = if_else(top_category %in% target_categories, reference_name, category_name),
-           category_indicator = factor(category_indicator, levels = c(reference_name, category_name)))  # Ensure Restaurant/Bar is the reference
+           category_indicator = factor(category_indicator, levels = c(reference_name, category_name)),
+           age_group = factor(age_group, levels = c("under_18", "19_65", "65_plus")))  # Ensure Restaurant/Bar is the reference
   
-  nb_model = glm.nb(visitor_count ~ age_group * category_indicator, data = df_model)
+  nb_model = glm.nb(visitor_count ~ age_group * category_indicator + offset(log(total_visitors)), data = df_model)
 
   print(summary(nb_model))
   
   return(nb_model)
 }
 
-
-  df_model = df_long |> 
-    filter(top_category %in% c(target_categories, all_cat)) |>  # Filter to only relevant POIs
-    mutate(category_indicator = if_else(top_category %in% target_categories, "Restaurant/Bar", "Non-Restaurant"))
 
 # All groups v. restaurant and bar
 nb_model_1 = run_nb_model(df_long, "Non-Restaurant", all_cat, "Restaurant/Bar", target_categories)
@@ -519,97 +686,65 @@ nb_summary_table = bind_rows(
 knitr::kable(nb_summary_table)
 ```
 
-
-# Additional Visualizations
-
-## Visitor counts
-
+### NB no interaction and offset
 ```{r}
-state_visitors = final_df_with_state |> 
-  filter(visitor_state != "NY") |> 
-  filter(visitor_state != "NJ") |> 
-  group_by(visitor_state) |> 
-  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
-  arrange(desc(total_visitors))
+run_nb_model = function(df, category_name, category_vector) {
+  df_model = df |> 
+    filter(top_category %in% category_vector) |>  # Filter to only relevant POIs
+    mutate(
+           age_group = factor(age_group, levels = c("under_18", "19_65", "65_plus")))  # Ensure age group ordering
+  
+  nb_model = glm.nb(visitor_count ~ age_group + offset(log(total_visitors)), data = df_model)
 
-ggplot(state_visitors, aes(x = reorder(visitor_state, -total_visitors), y = total_visitors)) +
-  geom_col(fill = "steelblue") +
-  labs(
-    title = "Total Visitors by State",
-    x = "State",
-    y = "Total Visitors"
-  ) +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  print(summary(nb_model))
+  
+  return(nb_model)
+}
+
+# Run models for each POI type vs. Restaurant/Bar
+nb_model_1 = run_nb_model(df_long, "Full", all_cat)
+nb_model_2 = run_nb_model(df_long, "Healthcare", medical_services)
+nb_model_3 = run_nb_model(df_long, "Essential Services", essential_services)
+nb_model_4 = run_nb_model(df_long, "Retail Shopping", retail_shopping)
+nb_model_5 = run_nb_model(df_long, "Entertainment/Recreation", entertainment_recreation)
+nb_model_6 = run_nb_model(df_long, "Personal Services", personal_services)
+nb_model_7 = run_nb_model(df_long, "Hospitality/Lodging", hospitality_lodging)
+nb_model_8 = run_nb_model(df_long, "Office/Professional", office_professional)
+nb_model_9 = run_nb_model(df_long, "Restaurant/Bar", target_categories)
 ```
 
-## Map view of visitor counts
-
 ```{r}
-# Aggregate visitor counts by state
-state_visitors_map = final_df_with_state |> 
-  group_by(visitor_state) |> 
-  summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
-  filter(!is.na(visitor_state)) |> 
-  mutate(log_visitors = log1p(total_visitors)) |> 
-  rename(state = visitor_state)
+extract_nb_results = function(model, category_name) {
+  results = broom.mixed::tidy(model) |> 
+    mutate(significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    ))
+  
+  return(results)
+}
 
-# Plot using log scale
-plot_usmap(data = state_visitors_map, regions = "states", values = "log_visitors") +
-  scale_fill_viridis_c(name = "Log Visitors", option = "magma") +
-  labs(title = "Log-Scaled Visitor Counts by State") +
-  theme_minimal()
+# Combine results from all models
+nb_summary_table = bind_rows(
+  extract_nb_results(nb_model_1, "Non-Restaurant"),
+  extract_nb_results(nb_model_2, "Healthcare"),
+  extract_nb_results(nb_model_3, "Essential Services"),
+  extract_nb_results(nb_model_4, "Retail Shopping"),
+  extract_nb_results(nb_model_5, "Entertainment/Recreation"),
+  extract_nb_results(nb_model_6, "Personal Services"),
+  extract_nb_results(nb_model_7, "Hospitality/Lodging"),
+  extract_nb_results(nb_model_8, "Office/Professional"),
+  extract_nb_results(nb_model_9, "Restaurant/Bar")
+)
 
-```
+nb_summary_table = nb_summary_table |> 
+  bind_cols(category = c("Full","Full","Full", "Healthcare", "Healthcare", "Healthcare", "Essential Services","Essential Services","Essential Services", "Retail Shopping","Retail Shopping","Retail Shopping", "Entertainment/Recreation","Entertainment/Recreation","Entertainment/Recreation", "Personal Services","Personal Services","Personal Services", "Hospitality/Lodging","Hospitality/Lodging","Hospitality/Lodging", "Office/Professional","Office/Professional","Office/Professional", "Restaurant/Bar","Restaurant/Bar","Restaurant/Bar")) |> 
+  relocate(category)
 
-
-## Bar Plot
-```{r}
-age_group_summary = df_long_model_filtered_1 |>
-  group_by(age_group, top_category) |>
-  summarize(total_visitors = sum(visitor_count), .groups = "drop")
-
-ggplot(age_group_summary, aes(x = age_group, y = total_visitors, fill = top_category)) +
-  geom_col(position = "dodge") +
-  labs(
-    title = "Visitor Counts by Age Group and Location Type",
-    x = "Age Group",
-    y = "Total Visitors",
-    fill = "Location Type"
-  ) +
-  theme_minimal()
-```
-
-## Pie chart (alternative to above)
-
-```{r}
-age_group_proportions = df_long_model_filtered_1 |>
-  group_by(age_group) |>
-  summarize(total_visitors = sum(visitor_count), .groups = "drop") |>
-  mutate(proportion = total_visitors / sum(total_visitors))
-
-ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
-  geom_bar(stat = "identity", width = 1) +
-  coord_polar(theta = "y") +
-  labs(
-    title = "Proportion of Visitors by Age Group",
-    fill = "Age Group"
-  ) +
-  theme_void()
+# Display as a table
+knitr::kable(nb_summary_table)
 
 ```
 
-
-## Density Plot
-
-```{r}
-ggplot(df_long_model_filtered_1, aes(x = visitor_count, fill = age_group)) +
-  geom_density(alpha = 0.6) +
-  labs(
-    title = "Density of Visitor Counts by Age Group",
-    x = "Visitor Count",
-    y = "Density",
-    fill = "Age Group"
-  ) +
-  theme_minimal()
-```
