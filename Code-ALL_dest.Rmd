@@ -44,7 +44,7 @@ state_county_code_str = c(36005, 36047, 36061, 36081, 36085)
 # Process visitor data - none missing
 filtered_df_visitor = df_visitor |> 
   mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
-  filter(first_five_digits %in% state_county_code_str) |> 
+ # filter(first_five_digits %in% state_county_code_str) |> 
   # Dropping missing values for home cbg
   filter(!is.na(visitor_home_aggregation)) |> 
   mutate(identifier = row_number()) |> 
@@ -145,7 +145,9 @@ df_long = final_df |>
          age_group = factor(age_group, levels = c("under_18", "19_65", "65_plus")))
 
 # Data quality looks good, 2 missing zip codes may need to be handled, but data is large enough maybe dropping them won't hurt (n = 21895 vs. n = 21893)
+
 ```
+
 
 ## Category definitions
 
@@ -293,6 +295,8 @@ office_professional = c(
 
 target_categories = c("Drinking Places (Alcoholic Beverages)", "Restaurants and Other Eating Places", "Beer, Wine, and Liquor Stores")
 
+df_long_model_filtered_1 = df_long |> 
+  mutate(non_restaurant = if_else(top_category %in% target_categories, "No", "Yes"))
 ```
 
 # Exploratory Data Analysis (EDA)
@@ -366,7 +370,15 @@ ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
 ```{r}
 #excise visitors from hawaii, include the second filter argument to get a better look at lower ends of data
 flow_df = final_df |> 
-  filter(vis_long > -150) #|> filter(total_visitors < 15)
+  filter(vis_long > -150) |> 
+  filter(poi_long > -150) |> 
+  filter(vis_lat < 60) |> 
+  filter(poi_lat < 50) |> 
+  left_join(df_tract_zip, by = c("visitor_zip" = "zip"), multiple = "any") |> 
+  select(!zip) |> 
+  rename(visitor_state = usps_zip_pref_state) |> 
+  left_join(df_tract_zip, by = c("poi_zip" = "zip"), multiple = "any") |> 
+  rename(poi_state = usps_zip_pref_state) |> filter(poi_state == "TN")
 
 # if you want to include visitors from hawaii
 # flow_df = final_df
@@ -738,9 +750,4 @@ nb_summary_table = nb_summary_table |>
 knitr::kable(nb_summary_table)
 
 ```
-
-
-
-
-
 
