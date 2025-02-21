@@ -20,6 +20,10 @@ library(maps)
 library(MASS)
 library(usmap)
 library(scales)
+library(Metrics)
+library(ModelMetrics)
+library(rsample)
+library(geosphere)
 
 conflicted::conflict_prefer("select", "dplyr")
 conflicted::conflict_prefer("map", "purrr")
@@ -235,7 +239,6 @@ medical_services = c(
 )
 
 essential_services = c(
-  "General Medical and Surgical Hospitals",
   "Health and Personal Care Stores",
   "Pharmacies and Drug Stores",
   "Grocery Stores",
@@ -410,8 +413,8 @@ ggplot() +
 
 ```{r}
 state_visitors = final_df_with_state |> 
-  filter(visitor_state != "NY") |> 
-  filter(visitor_state != "NJ") |> 
+ # filter(visitor_state != "NY") |> 
+ # filter(visitor_state != "NJ") |> 
   group_by(visitor_state) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
   arrange(desc(total_visitors))
@@ -741,8 +744,98 @@ knitr::kable(nb_summary_table)
 
 ```
 
+# Predictive model
 
+```{r}
+df_long$distance_km = distHaversine(
+  matrix(c(df_long$vis_long, df_long$vis_lat), ncol = 2),
+  matrix(c(df_long$poi_long, df_long$poi_lat), ncol = 2)
+) / 1000  
 
+set.seed(2025)  # Reproducibility
+
+df_long = df_long |> drop_na()  # Drop missing values, this was breaking ridge
+
+# Split dataset into training and testing
+train_index = createDataPartition(df_long$visitor_count, p = 0.8, list = FALSE)
+train_data = df_long[train_index, ]
+test_data = df_long[-train_index, ]
+
+```
+
+Ridge regression, did lasso earlier but tuning parameters were shrinking too many variables to 0 effectively breaking the model. Ridge does not shrink coefficients to 0.
+```{r}
+# Filter for age group
+train_under_18 = train_data |> filter(age_group == "under_18")
+test_under_18 = test_data |> filter(age_group == "under_18")
+
+X_train_under_18 = model.matrix(visitor_count ~ top_category + total_visitors + distance_km, data = train_under_18)[, -1]
+X_test_under_18 = model.matrix(visitor_count ~ top_category + total_visitors + distance_km, data = test_under_18)[, -1]
+y_train_under_18 = train_under_18$visitor_count
+y_test_under_18 = test_under_18$visitor_count
+
+ridge_cv_under_18 = cv.glmnet(X_train_under_18, y_train_under_18, alpha = 0, family = "poisson")
+best_lambda_ridge_under_18 = ridge_cv_under_18$lambda.min
+ridge_under_18 = glmnet(X_train_under_18, y_train_under_18, alpha = 0, family = "poisson", lambda = best_lambda_ridge_under_18)
+
+pred_ridge_under_18 = predict(ridge_under_18, X_test_under_18, type = "response")
+
+rmse_ridge_under_18 = sqrt(mean((y_test_under_18 - pred_ridge_under_18)^2))
+cat("Ridge RMSE for Under 18:", rmse_ridge_under_18, "\n")
+
+```
+
+```{r}
+### Ridge for 19-65
+train_19_65 = train_data |> filter(age_group == "19_65")
+test_19_65 = test_data |> filter(age_group == "19_65")
+
+X_train_19_65 = model.matrix(visitor_count ~ top_category + total_visitors + distance_km, data = train_19_65)[, -1]
+X_test_19_65 = model.matrix(visitor_count ~ top_category + total_visitors + distance_km, data = test_19_65)[, -1]
+y_train_19_65 = train_19_65$visitor_count
+y_test_19_65 = test_19_65$visitor_count
+
+ridge_cv_19_65 = cv.glmnet(X_train_19_65, y_train_19_65, alpha = 0, family = "poisson")
+best_lambda_ridge_19_65 = ridge_cv_19_65$lambda.min
+ridge_19_65 = glmnet(X_train_19_65, y_train_19_65, alpha = 0, family = "poisson", lambda = best_lambda_ridge_19_65)
+
+pred_ridge_19_65 = predict(ridge_19_65, X_test_19_65, type = "response")
+rmse_ridge_19_65 = sqrt(mean((y_test_19_65 - pred_ridge_19_65)^2))
+cat("Ridge RMSE for 19-65:", rmse_ridge_19_65, "\n")
+```
+
+```{r}
+### Ridge for 65+
+train_65_plus = train_data |> filter(age_group == "65_plus")
+test_65_plus = test_data |> filter(age_group == "65_plus")
+
+X_train_65_plus = model.matrix(visitor_count ~ top_category + total_visitors + distance_km, data = train_65_plus)[, -1]
+X_test_65_plus = model.matrix(visitor_count ~ top_category + total_visitors + distance_km, data = test_65_plus)[, -1]
+y_train_65_plus = train_65_plus$visitor_count
+y_test_65_plus = test_65_plus$visitor_count
+
+ridge_cv_65_plus = cv.glmnet(X_train_65_plus, y_train_65_plus, alpha = 0, family = "poisson")
+best_lambda_ridge_65_plus = ridge_cv_65_plus$lambda.min
+ridge_65_plus = glmnet(X_train_65_plus, y_train_65_plus, alpha = 0, family = "poisson", lambda = best_lambda_ridge_65_plus)
+
+pred_ridge_65_plus = predict(ridge_65_plus, X_test_65_plus, type = "response")
+rmse_ridge_65_plus = sqrt(mean((y_test_65_plus - pred_ridge_65_plus)^2))
+cat("Ridge RMSE for 65+:", rmse_ridge_65_plus, "\n")
+
+```
+
+```{r}
+# Extract and display non-zero coefficients for Under 18
+cat("\nSelected Variables for Under 18:\n")
+print(ridge_coefs_under_18_df |> filter(coefficient != 0))
+
+cat("\nSelected Variables for 19-65:\n")
+print(ridge_coefs_19_65_df |> filter(coefficient != 0))
+
+cat("\nSelected Variables for 65+:\n")
+print(ridge_coefs_65_plus_df |> filter(coefficient != 0))
+
+```
 
 
 
