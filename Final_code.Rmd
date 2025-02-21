@@ -1,10 +1,13 @@
 ---
-title: "Code - A bit more organized"
+title: "Final Code"
 author: "Dylan Koproski"
-date: "2025-01-28"
+date: "2025-02-21"
 output: pdf_document
 ---
-# Libraries
+# About
+This document includes ALL relevant code to the product and for Dylan's practicum. This is not restricted to NYC destinations, all destinations are included.
+
+# Package loading
 ```{r}
 library(tidyverse)
 library(jsonlite)
@@ -20,17 +23,19 @@ library(maps)
 library(MASS)
 library(usmap)
 library(scales)
-library(Metrics)
-library(ModelMetrics)
-library(rsample)
 library(geosphere)
 library(glmnet)
+library(rsample)
+library(Metrics)
+library(ModelMetrics)
+library(emmeans) 
 
 conflicted::conflict_prefer("select", "dplyr")
 conflicted::conflict_prefer("map", "purrr")
 conflicted::conflict_prefer("filter", "dplyr")
 ```
 
+# Data loading, processing and cleaning
 
 # Preprocessing
 
@@ -49,7 +54,7 @@ state_county_code_str = c(36005, 36047, 36061, 36081, 36085)
 # Process visitor data - none missing
 filtered_df_visitor = df_visitor |> 
   mutate(first_five_digits = substr(poi_cbg, 1, 5)) |>
-  filter(first_five_digits %in% state_county_code_str) |> 
+ # filter(first_five_digits %in% state_county_code_str) |> 
   # Dropping missing values for home cbg
   filter(!is.na(visitor_home_aggregation)) |> 
   mutate(identifier = row_number()) |> 
@@ -152,8 +157,6 @@ df_long = final_df |>
 # Data quality looks good, 2 missing zip codes may need to be handled, but data is large enough maybe dropping them won't hurt (n = 21895 vs. n = 21893)
 
 ```
-
-## Category definitions
 
 ```{r}
 all_cat = c(
@@ -298,6 +301,7 @@ office_professional = c(
 
 target_categories = c("Drinking Places (Alcoholic Beverages)", "Restaurants and Other Eating Places", "Beer, Wine, and Liquor Stores")
 
+# Honestly can't remember what this does, but everything breaks without it. Leave it here please
 df_long_model_filtered_1 = df_long |> 
   mutate(non_restaurant = if_else(top_category %in% target_categories, "No", "Yes"))
 ```
@@ -325,8 +329,6 @@ zip_matrix_plot = zip_matrix |>
     xlab = "Destination ZIP (To)",
     ylab = "Origin ZIP (From)"
   )
-
-
 ```
 
 ## State to Destination ZIP in NYC
@@ -370,12 +372,21 @@ ggplot(nyc_zip_visitors, aes(x = poi_long, y = poi_lat)) +
   theme_minimal()
 ```
 
-## Flow map - work in progress
+## Flow map - restrict to state of interest
+Illustrative, shows that not every states have visitors from all states, including NYC. Illustrates the need to include POI types from all states.
 
 ```{r}
 #excise visitors from hawaii, include the second filter argument to get a better look at lower ends of data
 flow_df = final_df |> 
-  filter(vis_long > -150) #|> filter(total_visitors < 15)
+  filter(vis_long > -150) |> 
+  filter(poi_long > -150) |> 
+  filter(vis_lat < 60) |> 
+  filter(poi_lat < 50) |> 
+  left_join(df_tract_zip, by = c("visitor_zip" = "zip"), multiple = "any") |> 
+  select(!zip) |> 
+  rename(visitor_state = usps_zip_pref_state) |> 
+  left_join(df_tract_zip, by = c("poi_zip" = "zip"), multiple = "any") |> 
+  rename(poi_state = usps_zip_pref_state) |> filter(poi_state == "TN")
 
 # if you want to include visitors from hawaii
 # flow_df = final_df
@@ -415,7 +426,7 @@ ggplot() +
 ```{r}
 state_visitors = final_df_with_state |> 
  # filter(visitor_state != "NY") |> 
- # filter(visitor_state != "NJ") |> 
+#  filter(visitor_state != "NJ") |> 
   group_by(visitor_state) |> 
   summarize(total_visitors = sum(visitors, na.rm = TRUE)) |> 
   arrange(desc(total_visitors))
@@ -447,41 +458,6 @@ plot_usmap(data = state_visitors_map, regions = "states", values = "log_visitors
   scale_fill_viridis_c(name = "Log Visitors", option = "magma") +
   labs(title = "Log-Scaled Visitor Counts by State") +
   theme_minimal()
-
-```
-
-```{r}
-# Function to create bar plots for each category
-plot_age_group_counts = function(df, category_name, category_vector) {
-  df_filtered = df |> 
-    filter(top_category %in% category_vector) |> 
-    group_by(age_group) |> 
-    summarize(total_visitors = sum(visitor_count, na.rm = TRUE), .groups = "drop")
-  
-  ggplot(df_filtered, aes(x = age_group, y = total_visitors)) +
-    geom_col(fill = "steelblue") +
-    labs(
-      title = paste("Visitor Counts by Age Group -", category_name),
-      x = "Age Group",
-      y = "Total Visitors"
-    ) +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 0, hjust = 0.5),
-      legend.position = "none"  # Remove legend
-    )
-}
-
-# Generate bar plots for each category
-plot_age_group_counts(df_long, "All", all_cat)
-plot_age_group_counts(df_long, "Healthcare", medical_services)
-plot_age_group_counts(df_long, "Essential Services", essential_services)
-plot_age_group_counts(df_long, "Retail Shopping", retail_shopping)
-plot_age_group_counts(df_long, "Entertainment/Recreation", entertainment_recreation)
-plot_age_group_counts(df_long, "Personal Services", personal_services)
-plot_age_group_counts(df_long, "Hospitality/Lodging", hospitality_lodging)
-plot_age_group_counts(df_long, "Office/Professional", office_professional)
-plot_age_group_counts(df_long, "Restaurant/Bar", target_categories)
 
 ```
 
@@ -520,25 +496,8 @@ ggplot(df_filtered, aes(x = category_group, y = total_visitors, fill = age_group
 
 ```
 
-
-## Bar Plot
-```{r}
-age_group_summary = df_long_model_filtered_1 |>
-  group_by(age_group, top_category) |>
-  summarize(total_visitors = sum(visitor_count), .groups = "drop")
-
-ggplot(age_group_summary, aes(x = age_group, y = total_visitors, fill = top_category)) +
-  geom_col(position = "dodge") +
-  labs(
-    title = "Visitor Counts by Age Group and Location Type",
-    x = "Age Group",
-    y = "Total Visitors",
-    fill = "Location Type"
-  ) +
-  theme_minimal()
-```
-
-## Pie chart (alternative to above)
+## Pie chart
+Simple visual to include in report, just shows the breakdown of age representation. Illustrates the need for an offset parameter in models.
 
 ```{r}
 age_group_proportions = df_long_model_filtered_1 |>
@@ -558,132 +517,11 @@ ggplot(age_group_proportions, aes(x = "", y = proportion, fill = age_group)) +
 ```
 
 
-## Density Plot
+# Hypothesis testing
+## Part 1: POI restricted age group visitation analysis
+Wanted to use poisson, ideal for count modelling. However, with overdispersion we use NB as it allows for multiple parameters to handle different variance from mean.
 
-```{r}
-ggplot(df_long_model_filtered_1, aes(x = visitor_count, fill = age_group)) +
-  geom_density(alpha = 0.6) +
-  labs(
-    title = "Density of Visitor Counts by Age Group",
-    x = "Visitor Count",
-    y = "Density",
-    fill = "Age Group"
-  ) +
-  theme_minimal()
-```
-
-# Modeling
-
-
-
-## All categories vs. categories of interest
-
-```{r}
-poisson_model_interact_1 = glm(visitor_count ~ age_group * non_restaurant, family = poisson(link = "log"), data = df_long_model_filtered_1)
-summary(poisson_model_interact_1)
-
-dispersion_test = sum(residuals(poisson_model_interact_1, type = "pearson")^2) / poisson_model_interact_1$df.residual
-print(dispersion_test)
-
-#Overdispersion present, use NB
-
-```
-
-
-## NB models, overdispersion was present
-### NB model on whole data
-"Are older individuals visiting restaurants/bars at lower rates compared to other age groups?"
-A negative estimate implies that an age group is visiting a location at a lower rate than the reference
-```{r}
-nb_whole = glm.nb(visitor_count ~ age_group, data = df_long)
-summary(nb_whole)
-
-
-df_model_filtered = df_long |> 
-  filter(top_category %in% target_categories)
-
-nb_rest = glm.nb(visitor_count ~ age_group, data = df_model_filtered)
-summary(nb_rest)
-```
-
-
-### NB with interaction
-"Are older individuals visiting restaurants/bars at lower rates compared to other location types?"
-
-```{r}
-run_nb_model = function(df, category_name, category_vector, reference_name, target_categories) {
-  df_model = df |> 
-    filter(top_category %in% c(target_categories, category_vector)) |>  # Filter to only relevant POIs
-    mutate(category_indicator = if_else(top_category %in% target_categories, reference_name, category_name),
-           category_indicator = factor(category_indicator, levels = c(reference_name, category_name)),
-           age_group = factor(age_group, levels = c("under_18", "19_65", "65_plus")))  # Ensure Restaurant/Bar is the reference
-  
-  nb_model = glm.nb(visitor_count ~ age_group * category_indicator + offset(log(total_visitors)), data = df_model)
-
-  print(summary(nb_model))
-  
-  return(nb_model)
-}
-
-
-# All groups v. restaurant and bar
-nb_model_1 = run_nb_model(df_long, "Non-Restaurant", all_cat, "Restaurant/Bar", target_categories)
-
-# Healthcare v. restaurant and bar
-nb_model_2 = run_nb_model(df_long, "Healthcare", medical_services, "Restaurant/Bar", target_categories)
-
-# Essential Services v. restaurant and bar
-nb_model_3 = run_nb_model(df_long, "Essential Services", essential_services, "Restaurant/Bar", target_categories)
-
-# Retail shopping v. restaurant and bar
-nb_model_4 = run_nb_model(df_long, "Retail Shopping", retail_shopping, "Restaurant/Bar", target_categories)
-
-# Entertainment/Recreation v. restaurant and bar
-nb_model_5 = run_nb_model(df_long, "Entertainment/Recreation", entertainment_recreation, "Restaurant/Bar", target_categories)
-
-# Personal Services v. restaurant and bar
-nb_model_6 = run_nb_model(df_long, "Personal Services", personal_services, "Restaurant/Bar", target_categories)
-
-#Hospitality/Lodging v. restaurant and bar
-nb_model_7 = run_nb_model(df_long, "Hospitality/Lodging", hospitality_lodging, "Restaurant/Bar", target_categories)
-
-#Office/Professional v. restaurant and bar
-nb_model_8 = run_nb_model(df_long, "Office/Professional", office_professional, "Restaurant/Bar", target_categories)
-
-```
-
-
-```{r}
-extract_nb_results = function(model, category_name) {
-  results = broom.mixed::tidy(model) |> 
-    filter(grepl("category_indicator", term)) |> 
-    mutate(category = category_name) |> 
-    relocate(category) |> 
-    mutate(significance = case_when(
-      p.value < 0.001 ~ "***",
-      p.value < 0.01  ~ "**",
-      p.value < 0.05  ~ "*",
-      TRUE ~ ""
-    ))
-  
-  return(results)
-}
-
-nb_summary_table = bind_rows(
-  extract_nb_results(nb_model_1, "Non-Restaurant"),
-  extract_nb_results(nb_model_2, "Healthcare"),
-  extract_nb_results(nb_model_3, "Essential Services"),
-  extract_nb_results(nb_model_4, "Retail Shopping"),
-  extract_nb_results(nb_model_5, "Entertainment/Recreation"),
-  extract_nb_results(nb_model_6, "Personal Services"),
-  extract_nb_results(nb_model_7, "Hospitality/Lodging"),
-  extract_nb_results(nb_model_8, "Office/Professional")
-)
-
-knitr::kable(nb_summary_table)
-```
-
-### NB no interaction and offset
+These models are not predictive, they answer the question: Does age group affect visits differently across POI types? Or in other words, when restricting data to a certain poi type, are we seeing different visitation rates.
 ```{r}
 run_nb_model = function(df, category_name, category_vector) {
   df_model = df |> 
@@ -745,7 +583,57 @@ knitr::kable(nb_summary_table)
 
 ```
 
-# Predictive model
+## Part 2: Age group restricted POI analysis
+
+It is now known that visitations differ by age group. When restricting to different categories, we see a noticeable trend that middle group visits most, <18 next and 65+ least. So now I ask, when restricting to one age group, are we seeing differences in visitation rates when comparing poi types? E.g. does age group 1 visit poi type x at a different rate than poi type y?
+
+```{r}
+  
+
+# Making a poi type column (this would've made the other analysis above a bit easier, however, it is already done and I am afraid of breaking this further. So we will persis like this).
+df_long = df_long |> mutate(poi_category = case_when(
+  top_category %in% medical_services ~ "Healthcare",
+  top_category %in% essential_services ~ "Essential Services",
+  top_category %in% retail_shopping ~ "Retail Shopping",
+  top_category %in% entertainment_recreation ~ "Entertainment/Recreation",
+  top_category %in% personal_services ~ "Personal Services",
+  top_category %in% hospitality_lodging ~ "Hospitality/Lodging",
+  top_category %in% office_professional ~ "Office/Professional",
+  top_category %in% target_categories ~ "Restaurant/Bar",
+  TRUE ~ "Other"
+))
+
+run_nb_model = function(df, age_group_label) {
+  df_filtered = df |> filter(age_group == age_group_label)
+  
+  nb_model = glm.nb(visitor_count ~ poi_category + offset(log(total_visitors)), 
+                    data = df_filtered)
+  
+  return(nb_model)
+}
+
+nb_model_under_18 = run_nb_model(df_long, "under_18")
+nb_model_19_65 = run_nb_model(df_long, "19_65")
+nb_model_65_plus = run_nb_model(df_long, "65_plus")
+
+extract_emmeans = function(model, age_group_label) {
+  em_results = emmeans(model, pairwise ~ poi_category, adjust = "bonferroni")
+  return(as.data.frame(em_results$contrasts) |> mutate(age_group = age_group_label))
+}
+
+em_under_18 = extract_emmeans(nb_model_under_18, "under_18")
+em_19_65 = extract_emmeans(nb_model_19_65, "19_65")
+em_65_plus = extract_emmeans(nb_model_65_plus, "65_plus")
+
+em_results_df = bind_rows(em_under_18, em_19_65, em_65_plus)
+
+print(em_results_df)
+
+```
+
+# Predictive models
+
+Now with inference out of the way, the final step here is to produce predictive models to determine how many visitors in a given age group we should expect given a certain POI type, total number of visitors and distance traveled. The result is three gravity models built using ridge regression. We perform a data split here. It is not super important to do the split since the model is cross validated using ridge, however, I want to see how the model fits new data. The data split provides an honest description of how the model will fit a new dataset. NOTE: ridge is selected over lasso because lasso shrinks low-priority coefficients to 0. Because of the large volume of POI types (many of which are insignificant). Ridge brings the most insignificant ones close to 0, but does not remove them completely. Ridge removes an error where lasso models would just have no parameters, despite the fact that many are important.
 
 ```{r}
 df_long$distance_km = distHaversine(
@@ -764,8 +652,8 @@ test_data = df_long[-train_index, ]
 
 ```
 
-Ridge regression, did lasso earlier but tuning parameters were shrinking too many variables to 0 effectively breaking the model. Ridge does not shrink coefficients to 0.
-```{r}
+
+```{r, eval = FALSE}
 # Filter for age group
 train_under_18 = train_data |> filter(age_group == "under_18")
 test_under_18 = test_data |> filter(age_group == "under_18")
@@ -784,9 +672,7 @@ pred_ridge_under_18 = predict(ridge_under_18, X_test_under_18, type = "response"
 rmse_ridge_under_18 = sqrt(mean((y_test_under_18 - pred_ridge_under_18)^2))
 cat("Ridge RMSE for Under 18:", rmse_ridge_under_18, "\n")
 
-```
 
-```{r}
 ### Ridge for 19-65
 train_19_65 = train_data |> filter(age_group == "19_65")
 test_19_65 = test_data |> filter(age_group == "19_65")
@@ -803,9 +689,7 @@ ridge_19_65 = glmnet(X_train_19_65, y_train_19_65, alpha = 0, family = "poisson"
 pred_ridge_19_65 = predict(ridge_19_65, X_test_19_65, type = "response")
 rmse_ridge_19_65 = sqrt(mean((y_test_19_65 - pred_ridge_19_65)^2))
 cat("Ridge RMSE for 19-65:", rmse_ridge_19_65, "\n")
-```
 
-```{r}
 ### Ridge for 65+
 train_65_plus = train_data |> filter(age_group == "65_plus")
 test_65_plus = test_data |> filter(age_group == "65_plus")
@@ -823,9 +707,7 @@ pred_ridge_65_plus = predict(ridge_65_plus, X_test_65_plus, type = "response")
 rmse_ridge_65_plus = sqrt(mean((y_test_65_plus - pred_ridge_65_plus)^2))
 cat("Ridge RMSE for 65+:", rmse_ridge_65_plus, "\n")
 
-```
 
-```{r}
 # Extract and display non-zero coefficients for Under 18
 cat("\nSelected Variables for Under 18:\n")
 print(ridge_coefs_under_18_df |> filter(coefficient != 0))
@@ -837,6 +719,3 @@ cat("\nSelected Variables for 65+:\n")
 print(ridge_coefs_65_plus_df |> filter(coefficient != 0))
 
 ```
-
-
-
